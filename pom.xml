@@ -12,6 +12,8 @@
 
     <modules>
         <module>contracts</module>
+        <module>platform-security</module>
+        <module>api-gateway</module>
         <module>location-service</module>
         <module>ledger-service</module>
         <module>shipment-service</module>
@@ -26,6 +28,7 @@
         <spring-boot.version>4.1.2</spring-boot.version>
         <grpc.version>1.84.1</grpc.version>
         <protobuf.version>4.36.2</protobuf.version>
+        <spring-cloud.version>2025.1.4</spring-cloud.version>
     </properties>
 
     <dependencyManagement>
@@ -53,8 +56,21 @@
             </dependency>
 
             <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <dependency>
                 <groupId>com.routemesh</groupId>
                 <artifactId>contracts</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.routemesh</groupId>
+                <artifactId>platform-security</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

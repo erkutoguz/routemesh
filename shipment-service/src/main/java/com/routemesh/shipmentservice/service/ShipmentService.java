@@ -12,6 +12,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.routemesh.contracts.events.EventEnvelope;
@@ -60,7 +61,7 @@ public class ShipmentService {
             return replayOrConflict(existing, requestHash);
         }
 
-        Shipment created = repository.insert(command, requestHash).orElse(null);
+        Shipment created = insert(command, requestHash);
         if (created == null) {
             return replayOrConflict(repository.findByIdempotencyKey(command.idempotencyKey()).orElseThrow(),
                     requestHash);
@@ -171,6 +172,14 @@ public class ShipmentService {
                 jsonMapper.writeValueAsString(envelope));
     }
 
+    private Shipment insert(CreateShipmentCommand command, String requestHash) {
+        try {
+            return repository.insert(command, requestHash).orElse(null);
+        } catch (DuplicateKeyException e) {
+            throw new ShipmentException(Reason.IDEMPOTENCY_CONFLICT, "shipment_id already exists");
+        }
+    }
+
     private ShipmentResult replayOrConflict(StoredShipment existing, String requestHash) {
         if (!existing.requestHash().equals(requestHash)) {
             throw new ShipmentException(Reason.IDEMPOTENCY_CONFLICT,
@@ -223,7 +232,7 @@ public class ShipmentService {
         return sha256(String.join("|", String.valueOf(c.merchantId()), c.recipientName(), c.recipientPhone(),
                 c.deliveryAddress(), String.valueOf(c.deliveryLatitude()), String.valueOf(c.deliveryLongitude()),
                 String.valueOf(c.quoteId()), String.valueOf(c.finalAmountMinor()),
-                String.valueOf(c.basePriceMinor()), c.currency()));
+                String.valueOf(c.basePriceMinor()), c.currency(), String.valueOf(c.shipmentId())));
     }
 
     private static String hash(TransitionCommand c) {

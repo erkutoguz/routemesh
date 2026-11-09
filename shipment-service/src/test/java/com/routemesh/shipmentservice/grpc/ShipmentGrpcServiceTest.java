@@ -100,6 +100,18 @@ class ShipmentGrpcServiceTest {
     }
 
     @Test
+    void createShipment_withShipmentId_usesIt_andInvalidIdIsRejected() {
+        String id = UUID.randomUUID().toString();
+        CreateShipmentRequest request = createRequest(key()).toBuilder().setShipmentId(id).build();
+
+        assertThat(stub.createShipment(request).getShipment().getId()).isEqualTo(id);
+        assertCode(() -> stub.createShipment(createRequest(key()).toBuilder().setShipmentId("x").build()),
+                Status.Code.INVALID_ARGUMENT);
+        assertCode(() -> stub.createShipment(createRequest(key()).toBuilder().setShipmentId(id).build()),
+                Status.Code.ALREADY_EXISTS);
+    }
+
+    @Test
     void createShipment_invalidRequests_areInvalidArgument() {
         CreateShipmentRequest valid = createRequest(key());
 

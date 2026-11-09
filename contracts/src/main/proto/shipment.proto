@@ -58,6 +58,7 @@ message CreateShipmentRequest {
   string quote_id = 7;
   routemesh.common.v1.Money final_amount = 8;
   routemesh.common.v1.Money base_price = 9;
+  optional string shipment_id = 10;
 }
 
 message CreateShipmentResponse {

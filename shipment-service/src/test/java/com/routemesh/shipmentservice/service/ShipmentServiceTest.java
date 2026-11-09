@@ -113,6 +113,36 @@ class ShipmentServiceTest {
     }
 
     @Test
+    void create_withClientSuppliedId_usesItAndReplaysIdempotently() {
+        UUID id = UUID.randomUUID();
+        CreateShipmentCommand command = withId(newCommand(key()), id);
+
+        ShipmentResult first = service.create(command);
+        ShipmentResult second = service.create(command);
+
+        assertThat(first.shipment().id()).isEqualTo(id);
+        assertThat(first.replayed()).isFalse();
+        assertThat(second.replayed()).isTrue();
+        assertThat(second.shipment().id()).isEqualTo(id);
+    }
+
+    @Test
+    void create_sameKeyWithDifferentShipmentId_isConflict() {
+        CreateShipmentCommand command = withId(newCommand(key()), UUID.randomUUID());
+        service.create(command);
+
+        assertReason(() -> service.create(withId(command, UUID.randomUUID())), Reason.IDEMPOTENCY_CONFLICT);
+    }
+
+    @Test
+    void create_withShipmentIdAlreadyUsedUnderOtherKey_isConflict() {
+        UUID id = UUID.randomUUID();
+        service.create(withId(newCommand(key()), id));
+
+        assertReason(() -> service.create(withId(newCommand(key()), id)), Reason.IDEMPOTENCY_CONFLICT);
+    }
+
+    @Test
     void create_invalidInputs_areRejected() {
         UUID merchant = UUID.randomUUID();
         UUID quote = UUID.randomUUID();
@@ -394,6 +424,12 @@ class ShipmentServiceTest {
 
     private void addProofOfDelivery(UUID id) {
         jdbc.update("INSERT INTO proof_of_delivery (shipment_id) VALUES (?) ON CONFLICT DO NOTHING", id);
+    }
+
+    private static CreateShipmentCommand withId(CreateShipmentCommand c, UUID id) {
+        return new CreateShipmentCommand(c.idempotencyKey(), c.merchantId(), c.recipientName(), c.recipientPhone(),
+                c.deliveryAddress(), c.deliveryLatitude(), c.deliveryLongitude(), c.quoteId(),
+                c.finalAmountMinor(), c.basePriceMinor(), c.currency(), id);
     }
 
     private static CreateShipmentCommand newCommand(String key) {

@@ -3,6 +3,7 @@ package com.routemesh.shipmentservice;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -155,6 +156,40 @@ class ShipmentSchemaTest {
 
         assertThatThrownBy(() -> owner.update(insertSql("idempotency_key", "'" + key + "'")))
                 .hasStackTraceContaining("duplicate key");
+    }
+
+    @Test
+    void outboxPublication_publishesOnlyInserts() {
+        Map<String, Object> publication = owner.queryForMap(
+                "SELECT pubinsert, pubupdate, pubdelete, pubtruncate FROM pg_publication "
+                        + "WHERE pubname = 'outbox_publication'");
+
+        assertThat(publication).containsEntry("pubinsert", true).containsEntry("pubupdate", false)
+                .containsEntry("pubdelete", false).containsEntry("pubtruncate", false);
+        assertThat(owner.queryForList(
+                "SELECT tablename FROM pg_publication_tables WHERE pubname = 'outbox_publication'", String.class))
+                .containsExactly("outbox_events");
+    }
+
+    @Test
+    void debeziumRole_canReplicateAndReadOnlyTheOutbox() {
+        assertThat(owner.queryForObject("SELECT rolreplication FROM pg_roles WHERE rolname = 'debezium'",
+                Boolean.class)).isTrue();
+        assertThat(owner.queryForObject("SELECT has_table_privilege('debezium', 'outbox_events', 'SELECT')",
+                Boolean.class)).isTrue();
+        assertThat(owner.queryForObject("SELECT has_table_privilege('debezium', 'shipments', 'SELECT')",
+                Boolean.class)).isFalse();
+    }
+
+    @Test
+    void appRole_canDeleteOutboxEventsButNotUpdateThem() {
+        UUID id = UUID.randomUUID();
+        app.update("INSERT INTO outbox_events (id, aggregate_type, aggregate_id, type, payload) "
+                + "VALUES (?, 'test', 'x', 'T', '{}'::jsonb)", id);
+
+        assertThatThrownBy(() -> app.update("UPDATE outbox_events SET type = 'Y' WHERE id = ?", id))
+                .hasStackTraceContaining("permission denied");
+        assertThat(app.update("DELETE FROM outbox_events WHERE id = ?", id)).isEqualTo(1);
     }
 
     private UUID insertShipment(String status, UUID courierId) {

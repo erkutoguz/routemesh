@@ -3,7 +3,9 @@ package com.routemesh.shipmentservice.repository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -145,6 +147,14 @@ public class ShipmentRepository {
                 .param("aggregateId", aggregateId)
                 .param("type", type)
                 .param("payload", payload)
+                .update();
+    }
+
+    public int deleteOutboxOlderThan(Instant cutoff, int batchSize) {
+        return jdbc.sql("DELETE FROM outbox_events WHERE id IN "
+                        + "(SELECT id FROM outbox_events WHERE created_at < :cutoff ORDER BY created_at LIMIT :batch)")
+                .param("cutoff", OffsetDateTime.ofInstant(cutoff, ZoneOffset.UTC))
+                .param("batch", batchSize)
                 .update();
     }
 

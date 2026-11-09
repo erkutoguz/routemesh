@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package routemesh.payment.v1;
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "com.routemesh.contracts.payment";
+
+service PaymentService {
+  rpc CreatePaymentIntent(CreatePaymentIntentRequest) returns (PaymentCommandResponse);
+  rpc CapturePayment(CapturePaymentRequest) returns (PaymentCommandResponse);
+  rpc VoidPayment(VoidPaymentRequest) returns (PaymentCommandResponse);
+  rpc RefundPayment(RefundPaymentRequest) returns (PaymentCommandResponse);
+  rpc ExpirePayment(ExpirePaymentRequest) returns (PaymentCommandResponse);
+  rpc GetPayment(GetPaymentRequest) returns (PaymentIntent);
+}
+
+enum PaymentStatus {
+  PAYMENT_STATUS_UNSPECIFIED = 0;
+  PAYMENT_STATUS_CREATED = 1;
+  PAYMENT_STATUS_AUTHORIZED = 2;
+  PAYMENT_STATUS_CAPTURED = 3;
+  PAYMENT_STATUS_PARTIALLY_REFUNDED = 4;
+  PAYMENT_STATUS_REFUNDED = 5;
+  PAYMENT_STATUS_VOIDED = 6;
+  PAYMENT_STATUS_EXPIRED = 7;
+  PAYMENT_STATUS_FAILED = 8;
+}
+
+message PaymentIntent {
+  string id = 1;
+  string shipment_id = 2;
+  routemesh.common.v1.Money amount = 3;
+  PaymentStatus status = 4;
+  routemesh.common.v1.Money refunded_amount = 5;
+  string checkout_url = 6;
+  optional string failure_reason = 7;
+  google.protobuf.Timestamp expires_at = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+  int64 version = 11;
+}
+
+message CreatePaymentIntentRequest {
+  string idempotency_key = 1;
+  string shipment_id = 2;
+  routemesh.common.v1.Money amount = 3;
+}
+
+message CapturePaymentRequest {
+  string payment_id = 1;
+  string idempotency_key = 2;
+}
+
+message VoidPaymentRequest {
+  string payment_id = 1;
+  string idempotency_key = 2;
+  string reason = 3;
+}
+
+message RefundPaymentRequest {
+  string payment_id = 1;
+  string idempotency_key = 2;
+  routemesh.common.v1.Money amount = 3;
+  string reason = 4;
+}
+
+message ExpirePaymentRequest {
+  string payment_id = 1;
+}
+
+message GetPaymentRequest {
+  string payment_id = 1;
+}
+
+message PaymentCommandResponse {
+  PaymentIntent payment = 1;
+  bool replayed = 2;
+  bool pending = 3;
+}

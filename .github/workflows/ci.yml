@@ -29,6 +29,8 @@ jobs:
           - ledger-service
           - shipment-service
           - pricing-service
+          - payment-service
+          - psp-simulator
 
     name: Test ${{ matrix.service }}
 

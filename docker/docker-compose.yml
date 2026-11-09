@@ -81,8 +81,10 @@ services:
       - sh
       - -c
       - >
+        for topic in shipment.events ledger.events; do
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists
-        --topic shipment.events --partitions 3 --replication-factor 1 --config retention.ms=604800000
+        --topic $$topic --partitions 3 --replication-factor 1 --config retention.ms=604800000 || exit 1;
+        done
 
   connect:
     image: quay.io/debezium/connect:3.7.1.Final
@@ -127,12 +129,16 @@ services:
       - sh
       - -c
       - >
+        for name in shipment-outbox ledger-outbox; do
         curl -sf -X PUT -H 'Content-Type: application/json'
-        --data @/connectors/shipment-outbox.json
-        http://connect:8083/connectors/shipment-outbox/config > /dev/null &&
-        sleep 5 &&
-        curl -s http://connect:8083/connectors/shipment-outbox/status &&
-        [ "$$(curl -s http://connect:8083/connectors/shipment-outbox/status | grep -o RUNNING | wc -l)" -ge 2 ]
+        --data @/connectors/$$name.json
+        http://connect:8083/connectors/$$name/config > /dev/null || exit 1;
+        done;
+        sleep 5;
+        for name in shipment-outbox ledger-outbox; do
+        curl -s http://connect:8083/connectors/$$name/status; echo;
+        [ "$$(curl -s http://connect:8083/connectors/$$name/status | grep -o RUNNING | wc -l)" -ge 2 ] || exit 1;
+        done
 
 volumes:
   redis-data:

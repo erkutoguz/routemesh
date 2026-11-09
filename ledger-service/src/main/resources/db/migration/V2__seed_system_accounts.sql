@@ -1,0 +1,4 @@
+INSERT INTO accounts (code, type, currency) VALUES
+    ('ASSET:PSP_CLEARING', 'ASSET', 'TRY'),
+    ('LIABILITY:ESCROW', 'LIABILITY', 'TRY'),
+    ('REVENUE:PLATFORM_FEE', 'REVENUE', 'TRY');

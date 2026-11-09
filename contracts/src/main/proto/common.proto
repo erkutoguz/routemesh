@@ -9,3 +9,8 @@ message LatLong {
   double latitude = 1;
   double longitude = 2;
 }
+
+message Money {
+  int64 amount_minor = 1;
+  string currency = 2;
+}

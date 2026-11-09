@@ -26,6 +26,7 @@ jobs:
       matrix:
         service:
           - location-service
+          - ledger-service
 
     name: Test ${{ matrix.service }}
 

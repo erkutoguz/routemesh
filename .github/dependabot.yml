@@ -8,6 +8,7 @@ updates:
       - "/location-service"
       - "/ledger-service"
       - "/shipment-service"
+      - "/pricing-service"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

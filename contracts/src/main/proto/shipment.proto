@@ -31,15 +31,6 @@ enum ShipmentStatus {
   SHIPMENT_STATUS_LOST = 13;
 }
 
-enum Actor {
-  ACTOR_UNSPECIFIED = 0;
-  ACTOR_SYSTEM = 1;
-  ACTOR_MERCHANT = 2;
-  ACTOR_COURIER = 3;
-  ACTOR_WAREHOUSE = 4;
-  ACTOR_OPS = 5;
-}
-
 message Shipment {
   string id = 1;
   string merchant_id = 2;
@@ -77,7 +68,8 @@ message CreateShipmentResponse {
 message TransitionStatusRequest {
   string shipment_id = 1;
   ShipmentStatus to_status = 2;
-  Actor actor = 3;
+  reserved 3;
+  reserved "actor";
   string transition_key = 4;
   string reason = 5;
   optional string courier_id = 6;

@@ -1,0 +1,3 @@
+CREATE ROLE debezium LOGIN REPLICATION PASSWORD 'debezium_dev';
+
+GRANT CONNECT ON DATABASE shipment TO debezium;

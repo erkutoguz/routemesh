@@ -1,0 +1,25 @@
+# Maven
+target/
+dependency-reduced-pom.xml
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.iws
+
+# Secrets / ortam
+.env
+!.env.example
+
+# Log ve geçici dosyalar
+*.log
+HELP.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code yerel ayarları
+.claude/settings.local.json
+CLAUDE.md

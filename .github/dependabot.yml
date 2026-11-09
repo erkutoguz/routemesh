@@ -1,0 +1,21 @@
+version: 2
+
+updates:
+  - package-ecosystem: maven
+    directories:
+      - "/"
+      - "/contracts"
+      - "/location-service"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker-compose
+    directory: "/docker"
+    schedule:
+      interval: weekly

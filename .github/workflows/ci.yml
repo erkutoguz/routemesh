@@ -31,6 +31,8 @@ jobs:
           - pricing-service
           - payment-service
           - psp-simulator
+          - platform-security
+          - api-gateway
 
     name: Test ${{ matrix.service }}
 

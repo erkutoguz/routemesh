@@ -1,0 +1,5 @@
+CREATE ROLE keycloak LOGIN PASSWORD 'keycloak_dev';
+
+CREATE DATABASE keycloak OWNER keycloak;
+
+REVOKE ALL ON DATABASE keycloak FROM PUBLIC;

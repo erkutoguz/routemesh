@@ -1,0 +1,114 @@
+{
+  "realm": "routemesh",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "accessTokenLifespan": 300,
+  "roles": {
+    "realm": [
+      { "name": "OPS", "description": "Operations staff" },
+      { "name": "MERCHANT", "description": "Merchant creating shipments" },
+      { "name": "COURIER", "description": "Courier delivering shipments" },
+      { "name": "WAREHOUSE", "description": "Warehouse staff" },
+      { "name": "WORKFLOW", "description": "Workflow orchestrator service account" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "routemesh-web",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:3000/*"],
+      "webOrigins": ["http://localhost:3000"],
+      "protocolMappers": [
+        {
+          "name": "routemesh-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "routemesh-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "workflow-service",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "workflow-service-dev-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "routemesh-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "routemesh-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "username": "ops",
+      "firstName": "Ops",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "ops@routemesh.test",
+      "credentials": [{ "type": "password", "value": "ops-dev", "temporary": false }],
+      "realmRoles": ["OPS"]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "username": "merchant",
+      "firstName": "Merchant",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "merchant@routemesh.test",
+      "credentials": [{ "type": "password", "value": "merchant-dev", "temporary": false }],
+      "realmRoles": ["MERCHANT"]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000003",
+      "username": "courier",
+      "firstName": "Courier",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "courier@routemesh.test",
+      "credentials": [{ "type": "password", "value": "courier-dev", "temporary": false }],
+      "realmRoles": ["COURIER"]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000004",
+      "username": "warehouse",
+      "firstName": "Warehouse",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "warehouse@routemesh.test",
+      "credentials": [{ "type": "password", "value": "warehouse-dev", "temporary": false }],
+      "realmRoles": ["WAREHOUSE"]
+    },
+    {
+      "username": "service-account-workflow-service",
+      "enabled": true,
+      "serviceAccountClientId": "workflow-service",
+      "realmRoles": ["WORKFLOW"]
+    }
+  ]
+}

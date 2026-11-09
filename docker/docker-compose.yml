@@ -172,7 +172,56 @@ services:
       retries: 18
       start_period: 40s
 
+  temporal-postgres:
+    image: postgres:16-alpine
+    container_name: routemesh-temporal-postgres
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal_dev
+    volumes:
+      - temporal-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.29.7
+    container_name: routemesh-temporal
+    depends_on:
+      temporal-postgres:
+        condition: service_healthy
+    ports:
+      - "7233:7233"
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal_dev
+      POSTGRES_SEEDS: temporal-postgres
+      DEFAULT_NAMESPACE: routemesh
+    healthcheck:
+      test: ["CMD-SHELL", "tctl --address $$(hostname -i):7233 cluster health | grep -q SERVING"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  temporal-ui:
+    image: temporalio/ui:2.58.1
+    container_name: routemesh-temporal-ui
+    depends_on:
+      temporal:
+        condition: service_healthy
+    ports:
+      - "8088:8080"
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_DEFAULT_NAMESPACE: routemesh
+
 volumes:
   redis-data:
   postgres-data:
   kafka-data:
+  temporal-postgres-data:

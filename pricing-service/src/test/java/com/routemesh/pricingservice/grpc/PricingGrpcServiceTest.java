@@ -25,13 +25,15 @@ import com.routemesh.contracts.pricing.RedeemQuoteRequest;
 import com.routemesh.contracts.pricing.RedeemQuoteResponse;
 import com.routemesh.contracts.pricing.ServiceLevel;
 import com.routemesh.pricingservice.TestcontainersConfiguration;
+import com.routemesh.platform.security.test.TestJwtConfiguration;
+import com.routemesh.platform.security.test.TestJwts;
 
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 
 @SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, TestJwtConfiguration.class})
 @AutoConfigureTestGrpcTransport
 class PricingGrpcServiceTest {
 
@@ -44,12 +46,28 @@ class PricingGrpcServiceTest {
     @BeforeEach
     void setUp() {
         channel = channels.createChannel("test");
-        stub = PricingServiceGrpc.newBlockingStub(channel);
+        stub = PricingServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(TestJwts.bearer(TestJwts.token("workflow-sa", "WORKFLOW")));
     }
 
     @AfterEach
     void tearDown() {
         channel.shutdownNow();
+    }
+
+    @Test
+    void calls_withoutWorkflowToken_areRejected() {
+        PricingServiceGrpc.PricingServiceBlockingStub anonymous = PricingServiceGrpc.newBlockingStub(channel);
+        PricingServiceGrpc.PricingServiceBlockingStub expired = PricingServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(TestJwts.bearer(TestJwts.token("workflow-sa", -60, "WORKFLOW")));
+
+        assertCode(() -> anonymous.getQuote(GetQuoteRequest.getDefaultInstance()), Status.Code.UNAUTHENTICATED);
+        assertCode(() -> expired.getQuote(GetQuoteRequest.getDefaultInstance()), Status.Code.UNAUTHENTICATED);
+        for (String role : new String[] {"MERCHANT", "COURIER", "WAREHOUSE", "OPS"}) {
+            PricingServiceGrpc.PricingServiceBlockingStub other = PricingServiceGrpc.newBlockingStub(channel)
+                    .withInterceptors(TestJwts.bearer(TestJwts.token("someone", role)));
+            assertCode(() -> other.getQuote(GetQuoteRequest.getDefaultInstance()), Status.Code.PERMISSION_DENIED);
+        }
     }
 
     @Test

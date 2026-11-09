@@ -29,6 +29,8 @@ import com.routemesh.paymentservice.FakePspClient;
 import com.routemesh.paymentservice.FakePspClient.Mode;
 import com.routemesh.paymentservice.TestPspConfiguration;
 import com.routemesh.paymentservice.TestcontainersConfiguration;
+import com.routemesh.platform.security.test.TestJwtConfiguration;
+import com.routemesh.platform.security.test.TestJwts;
 import com.routemesh.paymentservice.webhook.WebhookService;
 
 import io.grpc.ManagedChannel;
@@ -37,7 +39,7 @@ import io.grpc.StatusRuntimeException;
 import tools.jackson.databind.json.JsonMapper;
 
 @SpringBootTest
-@Import({TestcontainersConfiguration.class, TestPspConfiguration.class})
+@Import({TestcontainersConfiguration.class, TestPspConfiguration.class, TestJwtConfiguration.class})
 @AutoConfigureTestGrpcTransport
 class PaymentGrpcServiceTest {
 
@@ -60,12 +62,28 @@ class PaymentGrpcServiceTest {
     void setUp() {
         psp.reset();
         channel = channels.createChannel("test");
-        stub = PaymentServiceGrpc.newBlockingStub(channel);
+        stub = PaymentServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(TestJwts.bearer(TestJwts.token("workflow-sa", "WORKFLOW")));
     }
 
     @AfterEach
     void tearDown() {
         channel.shutdownNow();
+    }
+
+    @Test
+    void calls_withoutWorkflowToken_areRejected() {
+        PaymentServiceGrpc.PaymentServiceBlockingStub anonymous = PaymentServiceGrpc.newBlockingStub(channel);
+        PaymentServiceGrpc.PaymentServiceBlockingStub expired = PaymentServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(TestJwts.bearer(TestJwts.token("workflow-sa", -60, "WORKFLOW")));
+
+        assertCode(() -> anonymous.getPayment(GetPaymentRequest.getDefaultInstance()), Status.Code.UNAUTHENTICATED);
+        assertCode(() -> expired.getPayment(GetPaymentRequest.getDefaultInstance()), Status.Code.UNAUTHENTICATED);
+        for (String role : new String[] {"MERCHANT", "COURIER", "WAREHOUSE", "OPS"}) {
+            PaymentServiceGrpc.PaymentServiceBlockingStub other = PaymentServiceGrpc.newBlockingStub(channel)
+                    .withInterceptors(TestJwts.bearer(TestJwts.token("someone", role)));
+            assertCode(() -> other.getPayment(GetPaymentRequest.getDefaultInstance()), Status.Code.PERMISSION_DENIED);
+        }
     }
 
     @Test

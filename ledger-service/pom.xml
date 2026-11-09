@@ -32,6 +32,10 @@
             <artifactId>contracts</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.routemesh</groupId>
+            <artifactId>platform-security</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
@@ -60,6 +64,12 @@
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.routemesh</groupId>
+            <artifactId>platform-security</artifactId>
+            <type>test-jar</type>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

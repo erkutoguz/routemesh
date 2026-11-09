@@ -6,6 +6,7 @@ import java.sql.Types;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Repository;
 
 import com.routemesh.shipmentservice.domain.Actor;
 import com.routemesh.shipmentservice.domain.CreateShipmentCommand;
+import com.routemesh.shipmentservice.domain.HistoryEntry;
 import com.routemesh.shipmentservice.domain.Shipment;
 import com.routemesh.shipmentservice.domain.ShipmentStatus;
 
@@ -120,6 +122,21 @@ public class ShipmentRepository {
                 .param("to", to.name())
                 .param("courier", courierId, Types.OTHER)
                 .update();
+    }
+
+    public List<HistoryEntry> findHistory(UUID shipmentId) {
+        return jdbc.sql("SELECT from_status, to_status, actor, courier_id, reason, version, created_at "
+                        + "FROM shipment_status_history WHERE shipment_id = :shipment ORDER BY id")
+                .param("shipment", shipmentId)
+                .query((rs, n) -> new HistoryEntry(
+                        rs.getString("from_status"),
+                        rs.getString("to_status"),
+                        rs.getString("actor"),
+                        rs.getObject("courier_id", UUID.class),
+                        rs.getString("reason"),
+                        rs.getLong("version"),
+                        rs.getTimestamp("created_at").toInstant()))
+                .list();
     }
 
     public void insertHistory(UUID shipmentId, String transitionKey, String requestHash, ShipmentStatus from,

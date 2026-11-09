@@ -19,7 +19,6 @@ import com.routemesh.shipmentservice.service.ShipmentException.Reason;
 final class ShipmentMapper {
 
     private static final String STATUS_PREFIX = "SHIPMENT_STATUS_";
-    private static final String ACTOR_PREFIX = "ACTOR_";
 
     private ShipmentMapper() {
     }
@@ -52,7 +51,7 @@ final class ShipmentMapper {
         return new TransitionCommand(
                 parseUuid(request.getShipmentId(), "shipment_id"),
                 toStatus(request.getToStatus(), "to_status"),
-                toActor(request.getActor()),
+                Actor.SYSTEM,
                 request.getTransitionKey(),
                 request.getReason().isBlank() ? null : request.getReason(),
                 request.hasCourierId() ? parseUuid(request.getCourierId(), "courier_id") : null,
@@ -103,14 +102,6 @@ final class ShipmentMapper {
             throw invalid(field + " is required");
         }
         return ShipmentStatus.valueOf(status.name().substring(STATUS_PREFIX.length()));
-    }
-
-    private static Actor toActor(com.routemesh.contracts.shipment.Actor actor) {
-        if (actor == com.routemesh.contracts.shipment.Actor.ACTOR_UNSPECIFIED
-                || actor == com.routemesh.contracts.shipment.Actor.UNRECOGNIZED) {
-            throw invalid("actor is required");
-        }
-        return Actor.valueOf(actor.name().substring(ACTOR_PREFIX.length()));
     }
 
     private static Money.Builder money(long amountMinor, String currency) {

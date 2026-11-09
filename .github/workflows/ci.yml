@@ -33,6 +33,7 @@ jobs:
           - psp-simulator
           - platform-security
           - api-gateway
+          - workflow-service
 
     name: Test ${{ matrix.service }}
 

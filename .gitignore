@@ -23,3 +23,5 @@ Thumbs.db
 # Claude Code yerel ayarları
 .claude/settings.local.json
 CLAUDE.md
+
+path.md

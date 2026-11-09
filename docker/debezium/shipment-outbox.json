@@ -14,6 +14,7 @@
   "table.include.list": "public.outbox_events",
   "snapshot.mode": "no_data",
   "tombstones.on.delete": "false",
+  "extended.headers.enabled": "false",
   "key.converter": "org.apache.kafka.connect.storage.StringConverter",
   "value.converter": "org.apache.kafka.connect.storage.StringConverter",
   "transforms": "outbox",

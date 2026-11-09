@@ -28,6 +28,7 @@ jobs:
           - location-service
           - ledger-service
           - shipment-service
+          - pricing-service
 
     name: Test ${{ matrix.service }}
 

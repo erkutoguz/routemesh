@@ -15,6 +15,7 @@
         <module>location-service</module>
         <module>ledger-service</module>
         <module>shipment-service</module>
+        <module>pricing-service</module>
     </modules>
 
     <properties>

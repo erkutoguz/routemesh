@@ -15,7 +15,7 @@ services:
       retries: 10
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: routemesh-postgres
     environment:
       POSTGRES_USER: postgres

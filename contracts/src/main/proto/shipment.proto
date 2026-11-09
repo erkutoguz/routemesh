@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package routemesh.shipment.v1;
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "com.routemesh.contracts.shipment";
+
+service ShipmentService {
+  rpc CreateShipment(CreateShipmentRequest) returns (CreateShipmentResponse);
+  rpc TransitionStatus(TransitionStatusRequest) returns (TransitionStatusResponse);
+  rpc GetShipment(GetShipmentRequest) returns (Shipment);
+}
+
+enum ShipmentStatus {
+  SHIPMENT_STATUS_UNSPECIFIED = 0;
+  SHIPMENT_STATUS_PENDING_PAYMENT = 1;
+  SHIPMENT_STATUS_PAID = 2;
+  SHIPMENT_STATUS_AT_WAREHOUSE = 3;
+  SHIPMENT_STATUS_READY_FOR_DISPATCH = 4;
+  SHIPMENT_STATUS_ASSIGNED = 5;
+  SHIPMENT_STATUS_OUT_FOR_DELIVERY = 6;
+  SHIPMENT_STATUS_DELIVERED = 7;
+  SHIPMENT_STATUS_DELIVERY_FAILED = 8;
+  SHIPMENT_STATUS_RETURN_TO_WAREHOUSE = 9;
+  SHIPMENT_STATUS_DAMAGED = 10;
+  SHIPMENT_STATUS_ON_HOLD = 11;
+  SHIPMENT_STATUS_CANCELLED = 12;
+  SHIPMENT_STATUS_LOST = 13;
+}
+
+enum Actor {
+  ACTOR_UNSPECIFIED = 0;
+  ACTOR_SYSTEM = 1;
+  ACTOR_MERCHANT = 2;
+  ACTOR_COURIER = 3;
+  ACTOR_WAREHOUSE = 4;
+  ACTOR_OPS = 5;
+}
+
+message Shipment {
+  string id = 1;
+  string merchant_id = 2;
+  ShipmentStatus status = 3;
+  optional string courier_id = 4;
+  int64 version = 5;
+  string recipient_name = 6;
+  string recipient_phone = 7;
+  string delivery_address = 8;
+  routemesh.common.v1.LatLong delivery_location = 9;
+  string quote_id = 10;
+  routemesh.common.v1.Money final_amount = 11;
+  routemesh.common.v1.Money base_price = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+}
+
+message CreateShipmentRequest {
+  string idempotency_key = 1;
+  string merchant_id = 2;
+  string recipient_name = 3;
+  string recipient_phone = 4;
+  string delivery_address = 5;
+  routemesh.common.v1.LatLong delivery_location = 6;
+  string quote_id = 7;
+  routemesh.common.v1.Money final_amount = 8;
+  routemesh.common.v1.Money base_price = 9;
+}
+
+message CreateShipmentResponse {
+  Shipment shipment = 1;
+  bool replayed = 2;
+}
+
+message TransitionStatusRequest {
+  string shipment_id = 1;
+  ShipmentStatus to_status = 2;
+  Actor actor = 3;
+  string transition_key = 4;
+  string reason = 5;
+  optional string courier_id = 6;
+  optional ShipmentStatus expected_from_status = 7;
+}
+
+message TransitionStatusResponse {
+  Shipment shipment = 1;
+  bool replayed = 2;
+}
+
+message GetShipmentRequest {
+  string shipment_id = 1;
+}

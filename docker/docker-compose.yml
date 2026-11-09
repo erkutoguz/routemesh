@@ -1,0 +1,18 @@
+name: routemesh
+
+services:
+  redis:
+    image: redis:8.10.3
+    container_name: routemesh-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  redis-data:

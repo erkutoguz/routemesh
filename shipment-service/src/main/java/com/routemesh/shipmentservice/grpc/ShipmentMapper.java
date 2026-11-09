@@ -44,7 +44,8 @@ final class ShipmentMapper {
                 parseUuid(request.getQuoteId(), "quote_id"),
                 request.getFinalAmount().getAmountMinor(),
                 request.getBasePrice().getAmountMinor(),
-                request.getFinalAmount().getCurrency());
+                request.getFinalAmount().getCurrency(),
+                request.hasShipmentId() ? parseUuid(request.getShipmentId(), "shipment_id") : null);
     }
 
     static TransitionCommand toCommand(TransitionStatusRequest request) {

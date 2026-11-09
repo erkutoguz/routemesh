@@ -57,12 +57,13 @@ public class ShipmentRepository {
     }
 
     public Optional<Shipment> insert(CreateShipmentCommand command, String requestHash) {
-        return jdbc.sql("INSERT INTO shipments (idempotency_key, request_hash, merchant_id, status, "
+        return jdbc.sql("INSERT INTO shipments (id, idempotency_key, request_hash, merchant_id, status, "
                         + "recipient_name, recipient_phone, delivery_address, delivery_latitude, "
                         + "delivery_longitude, quote_id, final_amount_minor, base_price_minor, currency) "
-                        + "VALUES (:key, :hash, :merchant, 'PENDING_PAYMENT', :name, :phone, :address, :lat, :lon, "
+                        + "VALUES (COALESCE(:id, gen_random_uuid()), :key, :hash, :merchant, 'PENDING_PAYMENT', :name, :phone, :address, :lat, :lon, "
                         + ":quote, :finalAmount, :basePrice, :currency) "
                         + "ON CONFLICT (idempotency_key) DO NOTHING RETURNING " + COLUMNS)
+                .param("id", command.shipmentId(), Types.OTHER)
                 .param("key", command.idempotencyKey())
                 .param("hash", requestHash)
                 .param("merchant", command.merchantId())

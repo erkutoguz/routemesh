@@ -16,6 +16,8 @@
         <module>ledger-service</module>
         <module>shipment-service</module>
         <module>pricing-service</module>
+        <module>payment-service</module>
+        <module>psp-simulator</module>
     </modules>
 
     <properties>

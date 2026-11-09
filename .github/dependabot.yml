@@ -9,6 +9,8 @@ updates:
       - "/ledger-service"
       - "/shipment-service"
       - "/pricing-service"
+      - "/payment-service"
+      - "/psp-simulator"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

@@ -43,6 +43,8 @@ class ApiGatewayIntegrationTest {
     private static final RSAKey SIGNING_KEY = generateKey("signing");
     private static final RSAKey FOREIGN_KEY = generateKey("signing");
     private static final HttpServer UPSTREAM = startUpstream();
+    private static final AtomicReference<String> workflowCall = new AtomicReference<>();
+    private static final HttpServer WORKFLOW_UPSTREAM = startWorkflowUpstream();
 
     private final HttpClient client = HttpClient.newHttpClient();
 
@@ -55,17 +57,21 @@ class ApiGatewayIntegrationTest {
         registry.add("routemesh.security.issuer", () -> ISSUER);
         registry.add("routemesh.security.jwk-set-uri", () -> base + "/jwks");
         registry.add("routemesh.upstreams.shipment", () -> base);
+        registry.add("routemesh.upstreams.workflow",
+                () -> "http://localhost:" + WORKFLOW_UPSTREAM.getAddress().getPort());
     }
 
     @AfterAll
     static void stopUpstream() {
         UPSTREAM.stop(0);
+        WORKFLOW_UPSTREAM.stop(0);
     }
 
     @BeforeEach
     void reset() {
         upstreamAuthorization.set(null);
         upstreamPath.set(null);
+        workflowCall.set(null);
     }
 
     @Test
@@ -83,6 +89,23 @@ class ApiGatewayIntegrationTest {
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(upstreamPath.get()).isEqualTo("/api/v1/shipments/1");
         assertThat(upstreamAuthorization.get()).isEqualTo("Bearer " + token);
+    }
+
+    @Test
+    void postToShipmentsGoesToWorkflowServiceWhileOtherCallsGoToShipmentService() throws Exception {
+        String token = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("MERCHANT"), 300);
+
+        assertThat(send("POST", "/api/v1/shipments", token).statusCode()).isEqualTo(200);
+        assertThat(workflowCall.get()).isEqualTo("POST /api/v1/shipments Bearer " + token);
+        assertThat(upstreamPath.get()).isNull();
+
+        assertThat(get("/api/v1/shipments/1", token).statusCode()).isEqualTo(200);
+        assertThat(upstreamPath.get()).isEqualTo("/api/v1/shipments/1");
+        assertThat(workflowCall.get()).isEqualTo("POST /api/v1/shipments Bearer " + token);
+
+        workflowCall.set(null);
+        assertThat(send("POST", "/api/v1/shipments", null).statusCode()).isEqualTo(401);
+        assertThat(workflowCall.get()).isNull();
     }
 
     @Test
@@ -128,7 +151,13 @@ class ApiGatewayIntegrationTest {
     }
 
     private HttpResponse<String> get(String path, String token) throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path));
+        return send("GET", path, token);
+    }
+
+    private HttpResponse<String> send(String method, String path, String token) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .method(method, method.equals("POST") ? HttpRequest.BodyPublishers.ofString("{}")
+                        : HttpRequest.BodyPublishers.noBody());
         if (token != null) {
             request.header("Authorization", "Bearer " + token);
         }
@@ -156,6 +185,25 @@ class ApiGatewayIntegrationTest {
         try {
             return new RSAKeyGenerator(2048).keyID(kid).generate();
         } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static HttpServer startWorkflowUpstream() {
+        try {
+            HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+            server.createContext("/", exchange -> {
+                workflowCall.set(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath() + " "
+                        + exchange.getRequestHeaders().getFirst("Authorization"));
+                byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            server.start();
+            return server;
+        } catch (IOException e) {
             throw new IllegalStateException(e);
         }
     }

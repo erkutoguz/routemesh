@@ -13,6 +13,7 @@
     <modules>
         <module>contracts</module>
         <module>location-service</module>
+        <module>ledger-service</module>
     </modules>
 
     <properties>

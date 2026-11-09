@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package routemesh.pricing.v1;
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "com.routemesh.contracts.pricing";
+
+service PricingService {
+  rpc CreateQuote(CreateQuoteRequest) returns (CreateQuoteResponse);
+  rpc GetQuote(GetQuoteRequest) returns (Quote);
+  rpc RedeemQuote(RedeemQuoteRequest) returns (RedeemQuoteResponse);
+}
+
+enum ServiceLevel {
+  SERVICE_LEVEL_UNSPECIFIED = 0;
+  SERVICE_LEVEL_STANDARD = 1;
+  SERVICE_LEVEL_EXPRESS = 2;
+}
+
+enum QuoteStatus {
+  QUOTE_STATUS_UNSPECIFIED = 0;
+  QUOTE_STATUS_ACTIVE = 1;
+  QUOTE_STATUS_EXPIRED = 2;
+  QUOTE_STATUS_REDEEMED = 3;
+}
+
+message Quote {
+  string id = 1;
+  string merchant_id = 2;
+  routemesh.common.v1.LatLong origin = 3;
+  routemesh.common.v1.LatLong destination = 4;
+  string zone_code = 5;
+  ServiceLevel service_level = 6;
+  int32 weight_grams = 7;
+  int64 distance_meters = 8;
+  routemesh.common.v1.Money base_price = 9;
+  int32 surge_bps = 10;
+  routemesh.common.v1.Money final_amount = 11;
+  int32 sla_minutes = 12;
+  QuoteStatus status = 13;
+  google.protobuf.Timestamp created_at = 14;
+  google.protobuf.Timestamp expires_at = 15;
+  optional string redeemed_shipment_id = 16;
+}
+
+message CreateQuoteRequest {
+  string idempotency_key = 1;
+  string merchant_id = 2;
+  routemesh.common.v1.LatLong origin = 3;
+  routemesh.common.v1.LatLong destination = 4;
+  ServiceLevel service_level = 5;
+  int32 weight_grams = 6;
+}
+
+message CreateQuoteResponse {
+  Quote quote = 1;
+  bool replayed = 2;
+}
+
+message GetQuoteRequest {
+  string quote_id = 1;
+}
+
+message RedeemQuoteRequest {
+  string quote_id = 1;
+  string redemption_key = 2;
+  string shipment_id = 3;
+}
+
+message RedeemQuoteResponse {
+  Quote quote = 1;
+  bool replayed = 2;
+}

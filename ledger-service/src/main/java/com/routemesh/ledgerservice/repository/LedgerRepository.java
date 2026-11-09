@@ -2,6 +2,7 @@ package com.routemesh.ledgerservice.repository;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -105,6 +106,25 @@ public class LedgerRepository {
                 .param("account", accountId)
                 .param("direction", direction.name())
                 .param("amount", amountMinor)
+                .update();
+    }
+
+    public void insertOutbox(UUID eventId, String aggregateType, String aggregateId, String type, String payload) {
+        jdbc.sql("INSERT INTO outbox_events (id, aggregate_type, aggregate_id, type, payload) "
+                        + "VALUES (:id, :aggregateType, :aggregateId, :type, CAST(:payload AS jsonb))")
+                .param("id", eventId)
+                .param("aggregateType", aggregateType)
+                .param("aggregateId", aggregateId)
+                .param("type", type)
+                .param("payload", payload)
+                .update();
+    }
+
+    public int deleteOutboxOlderThan(Instant cutoff, int batchSize) {
+        return jdbc.sql("DELETE FROM outbox_events WHERE id IN "
+                        + "(SELECT id FROM outbox_events WHERE created_at < :cutoff ORDER BY created_at LIMIT :batch)")
+                .param("cutoff", OffsetDateTime.ofInstant(cutoff, ZoneOffset.UTC))
+                .param("batch", batchSize)
                 .update();
     }
 

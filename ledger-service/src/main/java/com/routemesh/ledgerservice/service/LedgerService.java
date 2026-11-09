@@ -18,6 +18,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.routemesh.contracts.events.EventEnvelope;
+import com.routemesh.contracts.events.LedgerTransactionPostedEvent;
 import com.routemesh.ledgerservice.domain.AccountCode;
 import com.routemesh.ledgerservice.domain.AccountType;
 import com.routemesh.ledgerservice.domain.Direction;
@@ -30,10 +32,13 @@ import com.routemesh.ledgerservice.repository.LedgerRepository.StoredEntry;
 import com.routemesh.ledgerservice.repository.LedgerRepository.StoredTransaction;
 import com.routemesh.ledgerservice.service.LedgerException.Reason;
 
+import tools.jackson.databind.json.JsonMapper;
+
 @Service
 public class LedgerService {
 
     private static final String CURRENCY = "TRY";
+    private static final String AGGREGATE_TYPE = "ledger";
     private static final int MAX_ENTRIES = 20;
     private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 255;
     private static final Pattern TRANSACTION_TYPE = Pattern.compile("^[A-Z][A-Z0-9_]{2,63}$");
@@ -46,9 +51,11 @@ public class LedgerService {
     }
 
     private final LedgerRepository repository;
+    private final JsonMapper jsonMapper;
 
-    public LedgerService(LedgerRepository repository) {
+    public LedgerService(LedgerRepository repository, JsonMapper jsonMapper) {
         this.repository = repository;
+        this.jsonMapper = jsonMapper;
     }
 
     @Transactional
@@ -87,7 +94,24 @@ public class LedgerService {
             repository.insertEntry(stored.id(), accounts.get(entry.code().value()).id(),
                     entry.direction(), entry.amountMinor());
         }
+        publish(command, stored, entries);
         return new PostedTransaction(stored.id(), false, stored.createdAt());
+    }
+
+    private void publish(PostTransactionCommand command, StoredTransaction stored, List<ParsedEntry> entries) {
+        LedgerTransactionPostedEvent event = new LedgerTransactionPostedEvent(
+                stored.id(), command.transactionType(), command.shipmentId(), command.reversalOf(), CURRENCY,
+                entries.stream()
+                        .map(e -> new LedgerTransactionPostedEvent.Entry(
+                                e.code().value(), e.direction().name(), e.amountMinor()))
+                        .toList());
+        String aggregateId = (command.shipmentId() != null ? command.shipmentId() : stored.id()).toString();
+        UUID eventId = UUID.randomUUID();
+        EventEnvelope<LedgerTransactionPostedEvent> envelope = new EventEnvelope<>(eventId,
+                LedgerTransactionPostedEvent.TYPE, LedgerTransactionPostedEvent.VERSION, stored.createdAt(),
+                aggregateId, event);
+        repository.insertOutbox(eventId, AGGREGATE_TYPE, aggregateId, LedgerTransactionPostedEvent.TYPE,
+                jsonMapper.writeValueAsString(envelope));
     }
 
     @Transactional(readOnly = true)

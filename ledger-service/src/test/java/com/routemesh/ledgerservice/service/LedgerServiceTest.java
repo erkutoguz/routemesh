@@ -25,6 +25,9 @@ import com.routemesh.ledgerservice.domain.PostTransactionCommand;
 import com.routemesh.ledgerservice.domain.PostedTransaction;
 import com.routemesh.ledgerservice.service.LedgerException.Reason;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest(properties = "spring.grpc.server.port=0")
 class LedgerServiceTest {
@@ -38,6 +41,9 @@ class LedgerServiceTest {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private JsonMapper jsonMapper;
 
     @Test
     void post_balancedTransaction_updatesBalances() {
@@ -270,6 +276,102 @@ class LedgerServiceTest {
         assertThat(results).extracting(PostedTransaction::id).containsOnly(results.get(0).id());
         assertThat(results.stream().filter(r -> !r.replayed()).count()).isEqualTo(1);
         assertThat(count("journal_transactions WHERE idempotency_key = ?", key)).isEqualTo(1);
+    }
+
+    @Test
+    void post_writesOneEventWithAllEntries_keyedByShipment() throws Exception {
+        UUID shipment = UUID.randomUUID();
+        String merchant = wallet("MERCHANT_WALLET");
+        capture(shipment, 1001);
+
+        PostedTransaction settlement = ledger.post(command(key(), shipment,
+                debit(ESCROW, 1001), credit(merchant, 750), credit(PLATFORM_FEE, 251)));
+
+        List<JsonNode> events = eventsFor(shipment.toString());
+        assertThat(events).hasSize(2);
+        JsonNode event = events.get(1);
+        assertThat(event.path("eventType").asString()).isEqualTo("LedgerTransactionPosted");
+        assertThat(event.path("eventVersion").asInt()).isEqualTo(1);
+        assertThat(event.path("aggregateId").asString()).isEqualTo(shipment.toString());
+        assertThat(event.path("occurredAt").asString()).isNotBlank();
+        JsonNode data = event.path("data");
+        assertThat(data.path("transactionId").asString()).isEqualTo(settlement.id().toString());
+        assertThat(data.path("transactionType").asString()).isEqualTo("TEST_TRANSACTION");
+        assertThat(data.path("shipmentId").asString()).isEqualTo(shipment.toString());
+        assertThat(data.path("currency").asString()).isEqualTo("TRY");
+        assertThat(data.path("entries")).hasSize(3);
+        assertThat(data.path("entries").get(0).path("accountCode").asString()).isEqualTo(ESCROW);
+        assertThat(data.path("entries").get(0).path("direction").asString()).isEqualTo("DEBIT");
+        assertThat(data.path("entries").get(0).path("amountMinor").asLong()).isEqualTo(1001);
+        assertThat(data.path("entries").get(1).path("accountCode").asString()).isEqualTo(merchant);
+        assertThat(data.path("entries").get(1).path("direction").asString()).isEqualTo("CREDIT");
+    }
+
+    @Test
+    void post_withoutShipment_usesTransactionIdAsEventKey() throws Exception {
+        PostedTransaction posted = ledger.post(command(key(), null, debit(PSP, 100), credit(PLATFORM_FEE, 100)));
+
+        List<JsonNode> events = eventsFor(posted.id().toString());
+
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).path("data").path("shipmentId").isNull()).isTrue();
+        assertThat(events.get(0).path("data").path("transactionId").asString()).isEqualTo(posted.id().toString());
+    }
+
+    @Test
+    void post_replayedOrRejected_doesNotWriteAnotherEvent() throws Exception {
+        UUID shipment = UUID.randomUUID();
+        PostTransactionCommand command = command(key(), shipment, debit(PSP, 500), credit(ESCROW, 500));
+        ledger.post(command);
+        ledger.post(command);
+
+        assertReason(() -> ledger.post(command(key(), shipment, debit(ESCROW, 501), credit(PLATFORM_FEE, 501))),
+                Reason.INSUFFICIENT_FUNDS);
+        assertReason(() -> ledger.post(command(key(), shipment, debit(PSP, 5), credit(ESCROW, 4))),
+                Reason.INVALID_REQUEST);
+
+        assertThat(eventsFor(shipment.toString())).hasSize(1);
+    }
+
+    @Test
+    void reversal_eventCarriesReversalOf() throws Exception {
+        UUID shipment = UUID.randomUUID();
+        PostedTransaction original = capture(shipment, 700);
+
+        ledger.post(reversal(original.id(), shipment, debit(ESCROW, 700), credit(PSP, 700)));
+
+        List<JsonNode> events = eventsFor(shipment.toString());
+        assertThat(events).hasSize(2);
+        assertThat(events.get(1).path("data").path("reversalOf").asString()).isEqualTo(original.id().toString());
+        assertThat(events.get(0).path("data").path("reversalOf").isNull()).isTrue();
+    }
+
+    @Test
+    void concurrentPosts_writeOneEventEach() throws Exception {
+        UUID shipment = UUID.randomUUID();
+        capture(shipment, 1000);
+        List<Callable<Boolean>> tasks = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            tasks.add(() -> {
+                try {
+                    ledger.post(command(key(), shipment, debit(ESCROW, 100), credit(PLATFORM_FEE, 100)));
+                    return true;
+                } catch (LedgerException e) {
+                    return false;
+                }
+            });
+        }
+
+        long succeeded = runConcurrently(tasks).stream().filter(Boolean::booleanValue).count();
+
+        assertThat(eventsFor(shipment.toString())).hasSize((int) succeeded + 1);
+    }
+
+    private List<JsonNode> eventsFor(String aggregateId) {
+        return jdbc.queryForList("SELECT payload::text FROM outbox_events WHERE aggregate_id = ? "
+                        + "ORDER BY created_at, id", String.class, aggregateId).stream()
+                .map(jsonMapper::readTree)
+                .toList();
     }
 
     private PostedTransaction capture(UUID shipment, long amount) {

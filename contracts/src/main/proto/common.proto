@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package routemesh.common.v1;
+
+option java_multiple_files = true;
+option java_package = "com.routemesh.contracts.common";
+
+message LatLong {
+  double latitude = 1;
+  double longitude = 2;
+}

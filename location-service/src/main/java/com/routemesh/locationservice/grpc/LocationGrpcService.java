@@ -42,6 +42,7 @@ public class LocationGrpcService extends LocationServiceGrpc.LocationServiceImpl
                     return;
                 }
                 try {
+                    CourierTokenGuard.verify(telemetry.getCourierId());
                     if (!telemetry.hasLocation()) {
                         throw new InvalidRequestException("location is required");
                     }
@@ -59,6 +60,9 @@ public class LocationGrpcService extends LocationServiceGrpc.LocationServiceImpl
                 } catch (InvalidRequestException e) {
                     failed = true;
                     responseObserver.onError(invalidArgument(e));
+                } catch (StatusRuntimeException e) {
+                    failed = true;
+                    responseObserver.onError(e);
                 }
             }
 

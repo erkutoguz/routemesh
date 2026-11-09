@@ -22,13 +22,15 @@ import com.routemesh.contracts.ledger.LedgerServiceGrpc;
 import com.routemesh.contracts.ledger.PostTransactionRequest;
 import com.routemesh.contracts.ledger.PostTransactionResponse;
 import com.routemesh.ledgerservice.TestcontainersConfiguration;
+import com.routemesh.platform.security.test.TestJwtConfiguration;
+import com.routemesh.platform.security.test.TestJwts;
 
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 
 @SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, TestJwtConfiguration.class})
 @AutoConfigureTestGrpcTransport
 class LedgerGrpcServiceTest {
 
@@ -44,12 +46,28 @@ class LedgerGrpcServiceTest {
     @BeforeEach
     void setUp() {
         channel = channels.createChannel("test");
-        stub = LedgerServiceGrpc.newBlockingStub(channel);
+        stub = LedgerServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(TestJwts.bearer(TestJwts.token("workflow-sa", "WORKFLOW")));
     }
 
     @AfterEach
     void tearDown() {
         channel.shutdownNow();
+    }
+
+    @Test
+    void calls_withoutWorkflowToken_areRejected() {
+        LedgerServiceGrpc.LedgerServiceBlockingStub anonymous = LedgerServiceGrpc.newBlockingStub(channel);
+        LedgerServiceGrpc.LedgerServiceBlockingStub expired = LedgerServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(TestJwts.bearer(TestJwts.token("workflow-sa", -60, "WORKFLOW")));
+
+        assertCode(() -> anonymous.getBalance(GetBalanceRequest.getDefaultInstance()), Status.Code.UNAUTHENTICATED);
+        assertCode(() -> expired.getBalance(GetBalanceRequest.getDefaultInstance()), Status.Code.UNAUTHENTICATED);
+        for (String role : new String[] {"MERCHANT", "COURIER", "WAREHOUSE", "OPS"}) {
+            LedgerServiceGrpc.LedgerServiceBlockingStub other = LedgerServiceGrpc.newBlockingStub(channel)
+                    .withInterceptors(TestJwts.bearer(TestJwts.token("someone", role)));
+            assertCode(() -> other.getBalance(GetBalanceRequest.getDefaultInstance()), Status.Code.PERMISSION_DENIED);
+        }
     }
 
     @Test

@@ -1,1 +1,2 @@
 com.routemesh.platform.security.PlatformSecurityAutoConfiguration
+com.routemesh.platform.security.PlatformGrpcSecurityAutoConfiguration

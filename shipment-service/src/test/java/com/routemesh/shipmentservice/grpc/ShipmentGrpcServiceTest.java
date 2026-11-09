@@ -16,7 +16,6 @@ import org.springframework.grpc.client.GrpcChannelFactory;
 
 import com.routemesh.contracts.common.LatLong;
 import com.routemesh.contracts.common.Money;
-import com.routemesh.contracts.shipment.Actor;
 import com.routemesh.contracts.shipment.CreateShipmentRequest;
 import com.routemesh.contracts.shipment.CreateShipmentResponse;
 import com.routemesh.contracts.shipment.GetShipmentRequest;
@@ -25,19 +24,27 @@ import com.routemesh.contracts.shipment.ShipmentServiceGrpc;
 import com.routemesh.contracts.shipment.ShipmentStatus;
 import com.routemesh.contracts.shipment.TransitionStatusRequest;
 import com.routemesh.contracts.shipment.TransitionStatusResponse;
+import com.routemesh.platform.security.test.TestJwtConfiguration;
+import com.routemesh.platform.security.test.TestJwts;
 import com.routemesh.shipmentservice.TestcontainersConfiguration;
+import com.routemesh.shipmentservice.domain.Actor;
+import com.routemesh.shipmentservice.domain.TransitionCommand;
+import com.routemesh.shipmentservice.service.ShipmentService;
 
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 
 @SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, TestJwtConfiguration.class})
 @AutoConfigureTestGrpcTransport
 class ShipmentGrpcServiceTest {
 
     @Autowired
     private GrpcChannelFactory channels;
+
+    @Autowired
+    private ShipmentService shipmentService;
 
     private ManagedChannel channel;
     private ShipmentServiceGrpc.ShipmentServiceBlockingStub stub;
@@ -45,7 +52,8 @@ class ShipmentGrpcServiceTest {
     @BeforeEach
     void setUp() {
         channel = channels.createChannel("test");
-        stub = ShipmentServiceGrpc.newBlockingStub(channel);
+        stub = ShipmentServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(TestJwts.bearer(TestJwts.token("workflow-sa", "WORKFLOW")));
     }
 
     @AfterEach
@@ -113,13 +121,12 @@ class ShipmentGrpcServiceTest {
         String id = stub.createShipment(createRequest(key())).getShipment().getId();
         String courier = UUID.randomUUID().toString();
 
-        transition(id, ShipmentStatus.SHIPMENT_STATUS_PAID, Actor.ACTOR_SYSTEM);
-        transition(id, ShipmentStatus.SHIPMENT_STATUS_AT_WAREHOUSE, Actor.ACTOR_WAREHOUSE);
-        transition(id, ShipmentStatus.SHIPMENT_STATUS_READY_FOR_DISPATCH, Actor.ACTOR_WAREHOUSE);
+        transition(id, ShipmentStatus.SHIPMENT_STATUS_PAID);
+        warehouseMove(id, com.routemesh.shipmentservice.domain.ShipmentStatus.AT_WAREHOUSE);
+        warehouseMove(id, com.routemesh.shipmentservice.domain.ShipmentStatus.READY_FOR_DISPATCH);
         TransitionStatusResponse assigned = stub.transitionStatus(TransitionStatusRequest.newBuilder()
                 .setShipmentId(id)
                 .setToStatus(ShipmentStatus.SHIPMENT_STATUS_ASSIGNED)
-                .setActor(Actor.ACTOR_SYSTEM)
                 .setTransitionKey(key())
                 .setCourierId(courier)
                 .setExpectedFromStatus(ShipmentStatus.SHIPMENT_STATUS_READY_FOR_DISPATCH)
@@ -133,8 +140,7 @@ class ShipmentGrpcServiceTest {
     @Test
     void transitionStatus_sameKeyTwice_isReplayed() {
         String id = stub.createShipment(createRequest(key())).getShipment().getId();
-        TransitionStatusRequest request = transitionRequest(id, ShipmentStatus.SHIPMENT_STATUS_PAID,
-                Actor.ACTOR_SYSTEM);
+        TransitionStatusRequest request = transitionRequest(id, ShipmentStatus.SHIPMENT_STATUS_PAID);
 
         TransitionStatusResponse first = stub.transitionStatus(request);
         TransitionStatusResponse second = stub.transitionStatus(request);
@@ -147,29 +153,57 @@ class ShipmentGrpcServiceTest {
     void transitionStatus_errors_areMappedToStatusCodes() {
         String id = stub.createShipment(createRequest(key())).getShipment().getId();
 
-        assertCode(() -> stub.transitionStatus(transitionRequest(id, ShipmentStatus.SHIPMENT_STATUS_DELIVERED,
-                Actor.ACTOR_COURIER)), Status.Code.FAILED_PRECONDITION);
-        assertCode(() -> stub.transitionStatus(transitionRequest(id, ShipmentStatus.SHIPMENT_STATUS_PAID,
-                Actor.ACTOR_MERCHANT)), Status.Code.FAILED_PRECONDITION);
+        assertCode(() -> stub.transitionStatus(transitionRequest(id, ShipmentStatus.SHIPMENT_STATUS_DELIVERED)),
+                Status.Code.FAILED_PRECONDITION);
+        assertCode(() -> stub.transitionStatus(transitionRequest(id, ShipmentStatus.SHIPMENT_STATUS_AT_WAREHOUSE)),
+                Status.Code.FAILED_PRECONDITION);
         assertCode(() -> stub.transitionStatus(transitionRequest(UUID.randomUUID().toString(),
-                ShipmentStatus.SHIPMENT_STATUS_PAID, Actor.ACTOR_SYSTEM)), Status.Code.NOT_FOUND);
-        assertCode(() -> stub.transitionStatus(transitionRequest(id, ShipmentStatus.SHIPMENT_STATUS_UNSPECIFIED,
-                Actor.ACTOR_SYSTEM)), Status.Code.INVALID_ARGUMENT);
-        assertCode(() -> stub.transitionStatus(transitionRequest(id, ShipmentStatus.SHIPMENT_STATUS_PAID,
-                Actor.ACTOR_UNSPECIFIED)), Status.Code.INVALID_ARGUMENT);
-        assertCode(() -> stub.transitionStatus(transitionRequest("not-a-uuid", ShipmentStatus.SHIPMENT_STATUS_PAID,
-                Actor.ACTOR_SYSTEM)), Status.Code.INVALID_ARGUMENT);
+                ShipmentStatus.SHIPMENT_STATUS_PAID)), Status.Code.NOT_FOUND);
+        assertCode(() -> stub.transitionStatus(transitionRequest(id, ShipmentStatus.SHIPMENT_STATUS_UNSPECIFIED)),
+                Status.Code.INVALID_ARGUMENT);
+        assertCode(() -> stub.transitionStatus(transitionRequest("not-a-uuid",
+                ShipmentStatus.SHIPMENT_STATUS_PAID)), Status.Code.INVALID_ARGUMENT);
     }
 
     @Test
     void transitionStatus_sameKeyDifferentPayload_isAlreadyExists() {
         String id = stub.createShipment(createRequest(key())).getShipment().getId();
         String key = key();
-        stub.transitionStatus(transitionRequest(id, ShipmentStatus.SHIPMENT_STATUS_PAID, Actor.ACTOR_SYSTEM)
+        stub.transitionStatus(transitionRequest(id, ShipmentStatus.SHIPMENT_STATUS_PAID)
                 .toBuilder().setTransitionKey(key).build());
 
-        assertCode(() -> stub.transitionStatus(transitionRequest(id, ShipmentStatus.SHIPMENT_STATUS_CANCELLED,
-                Actor.ACTOR_SYSTEM).toBuilder().setTransitionKey(key).build()), Status.Code.ALREADY_EXISTS);
+        assertCode(() -> stub.transitionStatus(transitionRequest(id, ShipmentStatus.SHIPMENT_STATUS_CANCELLED)
+                .toBuilder().setTransitionKey(key).build()), Status.Code.ALREADY_EXISTS);
+    }
+
+    @Test
+    void calls_withoutToken_areUnauthenticated() {
+        ShipmentServiceGrpc.ShipmentServiceBlockingStub anonymous = ShipmentServiceGrpc.newBlockingStub(channel);
+
+        assertCode(() -> anonymous.createShipment(createRequest(key())), Status.Code.UNAUTHENTICATED);
+    }
+
+    @Test
+    void calls_withExpiredOrForgedToken_areUnauthenticated() {
+        ShipmentServiceGrpc.ShipmentServiceBlockingStub expired = ShipmentServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(TestJwts.bearer(TestJwts.token("workflow-sa", -60, "WORKFLOW")));
+        ShipmentServiceGrpc.ShipmentServiceBlockingStub forged = ShipmentServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(TestJwts.bearer("not.a.jwt"));
+
+        assertCode(() -> expired.createShipment(createRequest(key())), Status.Code.UNAUTHENTICATED);
+        assertCode(() -> forged.createShipment(createRequest(key())), Status.Code.UNAUTHENTICATED);
+    }
+
+    @Test
+    void calls_withoutWorkflowRole_arePermissionDenied() {
+        for (String role : new String[] {"MERCHANT", "COURIER", "WAREHOUSE", "OPS"}) {
+            ShipmentServiceGrpc.ShipmentServiceBlockingStub stub = ShipmentServiceGrpc.newBlockingStub(channel)
+                    .withInterceptors(TestJwts.bearer(TestJwts.token(UUID.randomUUID().toString(), role)));
+
+            assertCode(() -> stub.createShipment(createRequest(key())), Status.Code.PERMISSION_DENIED);
+            assertCode(() -> stub.getShipment(GetShipmentRequest.newBuilder()
+                    .setShipmentId(UUID.randomUUID().toString()).build()), Status.Code.PERMISSION_DENIED);
+        }
     }
 
     @Test
@@ -180,15 +214,19 @@ class ShipmentGrpcServiceTest {
                 Status.Code.INVALID_ARGUMENT);
     }
 
-    private void transition(String id, ShipmentStatus to, Actor actor) {
-        stub.transitionStatus(transitionRequest(id, to, actor));
+    private void transition(String id, ShipmentStatus to) {
+        stub.transitionStatus(transitionRequest(id, to));
     }
 
-    private static TransitionStatusRequest transitionRequest(String id, ShipmentStatus to, Actor actor) {
+    private void warehouseMove(String id, com.routemesh.shipmentservice.domain.ShipmentStatus to) {
+        shipmentService.transition(new TransitionCommand(UUID.fromString(id), to, Actor.WAREHOUSE, key(), null,
+                null, null));
+    }
+
+    private static TransitionStatusRequest transitionRequest(String id, ShipmentStatus to) {
         return TransitionStatusRequest.newBuilder()
                 .setShipmentId(id)
                 .setToStatus(to)
-                .setActor(actor)
                 .setTransitionKey(key())
                 .build();
     }

@@ -5,7 +5,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Objects;
+import java.util.function.Predicate;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -16,6 +18,7 @@ import com.routemesh.contracts.events.EventEnvelope;
 import com.routemesh.contracts.events.ShipmentCreatedEvent;
 import com.routemesh.contracts.events.ShipmentStatusChangedEvent;
 import com.routemesh.shipmentservice.domain.Actor;
+import com.routemesh.shipmentservice.domain.HistoryEntry;
 import com.routemesh.shipmentservice.domain.CreateShipmentCommand;
 import com.routemesh.shipmentservice.domain.Shipment;
 import com.routemesh.shipmentservice.domain.ShipmentResult;
@@ -74,9 +77,15 @@ public class ShipmentService {
 
     @Transactional
     public ShipmentResult transition(TransitionCommand command) {
+        return transition(command, shipment -> true);
+    }
+
+    @Transactional
+    public ShipmentResult transition(TransitionCommand command, Predicate<Shipment> access) {
         validate(command);
 
         Shipment current = repository.findByIdForUpdate(command.shipmentId())
+                .filter(access)
                 .orElseThrow(() -> new ShipmentException(Reason.NOT_FOUND,
                         "shipment " + command.shipmentId() + " does not exist"));
         String requestHash = hash(command);
@@ -130,6 +139,12 @@ public class ShipmentService {
         return repository.findById(shipmentId)
                 .orElseThrow(() -> new ShipmentException(Reason.NOT_FOUND,
                         "shipment " + shipmentId + " does not exist"));
+    }
+
+    @Transactional(readOnly = true)
+    public List<HistoryEntry> history(UUID shipmentId) {
+        get(shipmentId);
+        return repository.findHistory(shipmentId);
     }
 
     private UUID resolveCourier(Shipment current, TransitionCommand command) {

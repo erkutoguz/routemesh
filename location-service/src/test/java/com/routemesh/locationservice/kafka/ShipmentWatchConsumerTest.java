@@ -134,7 +134,7 @@ class ShipmentWatchConsumerTest {
     void endStatuses_clearTheWatchWithoutCallingShipmentService(String status) {
         consumer.onMessage(event("ShipmentStatusChanged", status, 9, courierId));
 
-        verify(store).clearWatch(shipmentId.toString());
+        verify(store).clearWatch(shipmentId.toString(), status);
         verifyNoInteractions(shipments);
     }
 

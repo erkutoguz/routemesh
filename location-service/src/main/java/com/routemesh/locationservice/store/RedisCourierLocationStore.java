@@ -2,6 +2,8 @@ package com.routemesh.locationservice.store;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -95,13 +97,29 @@ public class RedisCourierLocationStore implements CourierLocationStore {
     }
 
     @Override
-    public void clearWatch(String shipmentId) {
+    public void clearWatch(String shipmentId, String reason) {
         redis.execute(
                 clearWatchScript,
                 List.of(SHIPMENT_INDEX_PREFIX + shipmentId, DONE_KEY_PREFIX + shipmentId),
                 shipmentId,
                 String.valueOf(tracking.doneTtl().toMillis()),
-                WATCH_KEY_PREFIX);
+                WATCH_KEY_PREFIX,
+                reason);
+    }
+
+    @Override
+    public Optional<WatchView> findWatch(String shipmentId) {
+        String courierId = redis.opsForValue().get(SHIPMENT_INDEX_PREFIX + shipmentId);
+        if (courierId == null) {
+            return Optional.empty();
+        }
+        Map<Object, Object> watch = redis.opsForHash().entries(WATCH_KEY_PREFIX + courierId);
+        if (!shipmentId.equals(watch.get("shipment"))) {
+            return Optional.empty();
+        }
+        return Optional.of(new WatchView(shipmentId, courierId, String.valueOf(watch.get("kind")),
+                Double.parseDouble(String.valueOf(watch.get("lat"))),
+                Double.parseDouble(String.valueOf(watch.get("lon"))), String.valueOf(watch.get("merchant"))));
     }
 
     @Override

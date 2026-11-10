@@ -1,5 +1,5 @@
 -- KEYS: 1 gönderi->kurye indeksi, 2 bitti işareti
--- ARGV: 1 gönderi, 2 bitti işareti TTL (ms), 3 kurye izleme kaydı anahtar öneki
+-- ARGV: 1 gönderi, 2 bitti işareti TTL (ms), 3 kurye izleme kaydı anahtar öneki, 4 bitiş nedeni (yeni durum)
 -- Kurye izleme kaydı yalnızca hâlâ bu gönderiye aitse silinir (kurye başka gönderiye geçmiş olabilir).
 -- Anahtar adı indeksten okunduğu için script yalnızca tek düğümlü Redis'te çalışır.
 local courier = redis.call('GET', KEYS[1])
@@ -13,4 +13,6 @@ if courier then
   redis.call('DEL', KEYS[1])
 end
 redis.call('SET', KEYS[2], '1', 'PX', ARGV[2])
+-- Açık canlı takip akışları bu kanaldan haber alıp kapanır
+redis.call('PUBLISH', 'watch:end:' .. ARGV[1], ARGV[4])
 return removed

@@ -29,9 +29,9 @@ import io.temporal.client.WorkflowClient;
 import io.temporal.testing.TestWorkflowEnvironment;
 import io.temporal.worker.Worker;
 
-@SpringBootTest(properties = {"routemesh.temporal.worker-enabled=false", "routemesh.dispatch.consumer-enabled=false"})
+@SpringBootTest(properties = { "routemesh.temporal.worker-enabled=false", "routemesh.dispatch.consumer-enabled=false" })
 @AutoConfigureMockMvc
-@Import({TestJwtConfiguration.class, ShipmentRequestControllerTest.TemporalTestConfiguration.class})
+@Import({ TestJwtConfiguration.class, ShipmentRequestControllerTest.TemporalTestConfiguration.class })
 class ShipmentRequestControllerTest {
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -129,15 +129,15 @@ class ShipmentRequestControllerTest {
 
     @Test
     void onlyMerchantsMayCreate() throws Exception {
-        for (String role : new String[] {"OPS", "COURIER", "WAREHOUSE", "WORKFLOW"}) {
+        for (String role : new String[] { "OPS", "COURIER", "WAREHOUSE", "WORKFLOW" }) {
             mvc.perform(post("/api/v1/shipments")
-                            .header("Authorization", "Bearer " + TestJwts.token(UUID.randomUUID().toString(), role))
-                            .header("Idempotency-Key", UUID.randomUUID().toString())
-                            .contentType(MediaType.APPLICATION_JSON).content(body()))
+                    .header("Authorization", "Bearer " + TestJwts.token(UUID.randomUUID().toString(), role))
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .contentType(MediaType.APPLICATION_JSON).content(body()))
                     .andExpect(status().isForbidden());
         }
         mvc.perform(post("/api/v1/shipments").header("Idempotency-Key", "k")
-                        .contentType(MediaType.APPLICATION_JSON).content(body()))
+                .contentType(MediaType.APPLICATION_JSON).content(body()))
                 .andExpect(status().isUnauthorized());
     }
 

@@ -19,6 +19,10 @@ redis.call('GEOADD', KEYS[1], ARGV[4], ARGV[5], ARGV[1])
 local t = redis.call('TIME')
 redis.call('ZADD', KEYS[3], t[1] * 1000 + math.floor(t[2] / 1000), ARGV[1])
 
+-- Canlı takip (SSE): konum, kuryenin kanalına yayınlanır. Aboneler "tür|epoch|seq|enlem|boylam[|hedef türü|mesafe]" okur.
+local channel = 'courier:loc:' .. ARGV[1]
+redis.call('PUBLISH', channel, 'L|' .. ARGV[2] .. '|' .. ARGV[3] .. '|' .. ARGV[5] .. '|' .. ARGV[4])
+
 local watch = redis.call('HMGET', KEYS[4], 'lat', 'lon', 'radius', 'state', 'shipment', 'kind')
 if watch[4] == 'ARMED' then
   -- Redis GEODIST ile aynı yarıçap, find_nearest.lua mesafeleriyle tutarlı olsun
@@ -31,6 +35,8 @@ if watch[4] == 'ARMED' then
   local distance = 2 * earth * math.asin(math.min(1, math.sqrt(a)))
   if distance <= tonumber(watch[3]) then
     redis.call('HSET', KEYS[4], 'state', 'FIRED')
+    redis.call('PUBLISH', channel, 'A|' .. ARGV[2] .. '|' .. ARGV[3] .. '|' .. ARGV[5] .. '|' .. ARGV[4] .. '|'
+      .. watch[6] .. '|' .. string.format('%.3f', distance))
     return {2, string.format('%.3f', distance), watch[5], watch[6]}
   end
 end

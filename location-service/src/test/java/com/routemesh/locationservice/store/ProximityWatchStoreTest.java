@@ -144,7 +144,7 @@ class ProximityWatchStoreTest {
     void clearWatch_removesTheWatch_andLateEventsCannotRecreateIt() {
         store.armWatch(watch("s1", "c1", Watch.DELIVERY, 6));
 
-        store.clearWatch("s1");
+        store.clearWatch("s1", "DELIVERED");
 
         assertThat(redis.hasKey(RedisCourierLocationStore.WATCH_KEY_PREFIX + "c1")).isFalse();
         assertThat(ping("c1", INSIDE).hit()).isNull();
@@ -156,7 +156,7 @@ class ProximityWatchStoreTest {
         store.armWatch(watch("s1", "c1", Watch.DELIVERY, 6));
         ping("c1", INSIDE);
 
-        store.clearWatch("s1");
+        store.clearWatch("s1", "DELIVERED");
 
         assertThat(store.findNearest(LAT, LON, 1000, 10)).extracting(NearbyCourier::courierId).contains("c1");
     }
@@ -166,7 +166,7 @@ class ProximityWatchStoreTest {
         store.armWatch(watch("s1", "c1", Watch.DELIVERY, 6));
         store.armWatch(watch("s2", "c1", Watch.PICKUP, 2));
 
-        store.clearWatch("s1");
+        store.clearWatch("s1", "DELIVERED");
 
         assertThat(redis.hasKey(RedisCourierLocationStore.WATCH_KEY_PREFIX + "c1")).isTrue();
         assertThat(ping("c1", INSIDE).hit().shipmentId()).isEqualTo("s2");
@@ -174,7 +174,7 @@ class ProximityWatchStoreTest {
 
     @Test
     void clearWatch_ofUnknownShipment_isHarmless() {
-        store.clearWatch("never-armed");
+        store.clearWatch("never-armed", "DELIVERED");
 
         assertThat(store.armWatch(watch("never-armed", "c1", Watch.PICKUP, 1))).isFalse();
     }

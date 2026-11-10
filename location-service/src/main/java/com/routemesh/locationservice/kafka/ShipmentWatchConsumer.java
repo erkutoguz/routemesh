@@ -62,7 +62,7 @@ public class ShipmentWatchConsumer {
         UUID shipmentId = UUID.fromString(data.path("shipmentId").asString());
 
         if (ENDED.contains(toStatus)) {
-            store.clearWatch(shipmentId.toString());
+            store.clearWatch(shipmentId.toString(), toStatus);
             log.info("Watch cleared for shipment {} ({})", shipmentId, toStatus);
         } else if (ASSIGNED.equals(toStatus) || OUT_FOR_DELIVERY.equals(toStatus)) {
             arm(shipmentId, toStatus, data);

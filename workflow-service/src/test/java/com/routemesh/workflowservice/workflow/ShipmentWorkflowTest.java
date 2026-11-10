@@ -24,17 +24,22 @@ import io.temporal.worker.Worker;
 class ShipmentWorkflowTest {
 
     private static final String TASK_QUEUE = "shipment";
+    private static final UUID COURIER = UUID.randomUUID();
 
     private TestWorkflowEnvironment env;
     private FakeActivities activities;
+    private FakeDispatchActivities dispatch;
 
     @BeforeEach
     void setUp() {
         env = TestWorkflowEnvironment.newInstance();
         activities = new FakeActivities();
         Worker worker = env.newWorker(TASK_QUEUE);
-        worker.registerWorkflowImplementationTypes(ShipmentWorkflowImpl.class);
-        worker.registerActivitiesImplementations(activities);
+        worker.registerWorkflowImplementationTypes(ShipmentWorkflowImpl.class, DispatchWorkflowImpl.class);
+        dispatch = new FakeDispatchActivities();
+        dispatch.defaultScan = List.of(COURIER);
+        dispatch.scenarios.put(COURIER, new FakeDispatchActivities.Scenario(FakeDispatchActivities.Behavior.ACCEPT, 1));
+        worker.registerActivitiesImplementations(activities, dispatch);
         env.start();
     }
 
@@ -205,12 +210,67 @@ class ShipmentWorkflowTest {
                 .isInstanceOf(io.temporal.client.WorkflowExecutionAlreadyStarted.class);
     }
 
+    @Test
+    void paidShipmentStaysOpenUntilReadyForDispatchThenAssignsACourier() {
+        ShipmentWorkflow workflow = start();
+        env.sleep(Duration.ofMinutes(20));
+
+        assertThat(activities.calls).endsWith("paid");
+        assertThat(WorkflowStub.fromTyped(workflow).describe().getStatus().name()).isEqualTo("WORKFLOW_EXECUTION_STATUS_RUNNING");
+        assertThat(workflow.awaitCheckout().paid()).isTrue();
+        assertThat(dispatch.calls).isEmpty();
+
+        ShipmentWorkflowResult result = result(workflow);
+
+        assertThat(result.status()).isEqualTo("PAID");
+        assertThat(dispatch.lastAssignedCourier).isEqualTo(COURIER);
+    }
+
+    @Test
+    void repeatedOrOlderReadySignalsDoNotDispatchAgain_andNewerOnesDoAfterHold() {
+        dispatch.defaultScan = List.of();
+        ShipmentWorkflow workflow = start();
+        env.sleep(Duration.ofMinutes(20));
+
+        workflow.readyForDispatch(4);
+        env.sleep(Duration.ofMinutes(12));
+        assertThat(dispatch.calls.stream().filter("hold"::equals).count()).isEqualTo(1);
+
+        dispatch.defaultScan = List.of(COURIER);
+        workflow.readyForDispatch(4);
+        workflow.readyForDispatch(3);
+        env.sleep(Duration.ofMinutes(2));
+        assertThat(dispatch.calls).doesNotContain("assign:" + COURIER);
+
+        workflow.readyForDispatch(7);
+        ShipmentWorkflowResult result = WorkflowStub.fromTyped(workflow).getResult(ShipmentWorkflowResult.class);
+
+        assertThat(result.status()).isEqualTo("PAID");
+        assertThat(dispatch.lastAssignedCourier).isEqualTo(COURIER);
+        assertThat(dispatch.calls.stream().filter("hold"::equals).count()).isEqualTo(1);
+    }
+
+    @Test
+    void cancellingAPaidShipmentWorkflowNeverRunsPaymentCompensations() {
+        ShipmentWorkflow workflow = start();
+        env.sleep(Duration.ofMinutes(20));
+        WorkflowStub stub = WorkflowStub.fromTyped(workflow);
+
+        stub.cancel();
+
+        assertThatThrownBy(() -> stub.getResult(ShipmentWorkflowResult.class)).isInstanceOf(WorkflowException.class);
+        assertThat(activities.calls).doesNotContain("releasePayment", "reverseEscrow", "cancelShipment");
+    }
+
     private void restartWith(FakeActivities replacement) {
         env.close();
         env = TestWorkflowEnvironment.newInstance();
         Worker worker = env.newWorker(TASK_QUEUE);
-        worker.registerWorkflowImplementationTypes(ShipmentWorkflowImpl.class);
-        worker.registerActivitiesImplementations(replacement);
+        worker.registerWorkflowImplementationTypes(ShipmentWorkflowImpl.class, DispatchWorkflowImpl.class);
+        dispatch = new FakeDispatchActivities();
+        dispatch.defaultScan = List.of(COURIER);
+        dispatch.scenarios.put(COURIER, new FakeDispatchActivities.Scenario(FakeDispatchActivities.Behavior.ACCEPT, 1));
+        worker.registerActivitiesImplementations(replacement, dispatch);
         env.start();
         activities = replacement;
     }
@@ -228,7 +288,13 @@ class ShipmentWorkflowTest {
         return workflow;
     }
 
+    /** Ödeme akışı bittikten sonra workflow dağıtım sinyalini bekler; sonuçlar için sinyali kendimiz göndeririz. */
     private static ShipmentWorkflowResult result(ShipmentWorkflow workflow) {
+        try {
+            workflow.readyForDispatch(1);
+        } catch (RuntimeException e) {
+            // workflow zaten bitti (iptal yolları)
+        }
         return WorkflowStub.fromTyped(workflow).getResult(ShipmentWorkflowResult.class);
     }
 

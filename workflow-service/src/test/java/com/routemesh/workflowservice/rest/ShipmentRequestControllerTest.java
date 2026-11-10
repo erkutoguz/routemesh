@@ -29,7 +29,7 @@ import io.temporal.client.WorkflowClient;
 import io.temporal.testing.TestWorkflowEnvironment;
 import io.temporal.worker.Worker;
 
-@SpringBootTest(properties = "routemesh.temporal.worker-enabled=false")
+@SpringBootTest(properties = {"routemesh.temporal.worker-enabled=false", "routemesh.dispatch.consumer-enabled=false"})
 @AutoConfigureMockMvc
 @Import({TestJwtConfiguration.class, ShipmentRequestControllerTest.TemporalTestConfiguration.class})
 class ShipmentRequestControllerTest {
@@ -68,6 +68,9 @@ class ShipmentRequestControllerTest {
     @Autowired
     private WorkflowClient workflowClient;
 
+    @Autowired
+    private TestWorkflowEnvironment testEnvironment;
+
     @BeforeEach
     void reset() {
         activities.failures.clear();
@@ -99,7 +102,7 @@ class ShipmentRequestControllerTest {
                 .andExpect(jsonPath("$.shipmentId").value(shipmentId.toString()))
                 .andExpect(jsonPath("$.checkoutUrl").value("http://psp/checkout/pay-1"));
 
-        workflowClient.newUntypedWorkflowStub("shipment-" + shipmentId).getResult(Object.class);
+        testEnvironment.sleep(java.time.Duration.ofMinutes(1));
 
         createAs(merchant, key, body()).andExpect(status().isOk())
                 .andExpect(jsonPath("$.shipmentId").value(shipmentId.toString()))

@@ -76,6 +76,10 @@ public class ShipmentStarter {
                             .build())
                     .getResultAsync(CHECKOUT_WAIT_SECONDS, TimeUnit.SECONDS)
                     .get();
+            if (checkout.paid()) {
+                return new Outcome.Finished(shipmentId,
+                        new ShipmentWorkflowResult(ShipmentWorkflowResult.PAID, null, checkout.paymentId()));
+            }
             return new Outcome.CheckoutReady(shipmentId, checkout);
         } catch (ExecutionException e) {
             return finishedOrFail(shipmentId, stub, e.getCause());

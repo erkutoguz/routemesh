@@ -129,6 +129,19 @@ class ShipmentActivitiesImplTest {
     }
 
     @Test
+    void createShipment_carriesTheQuotedWeightWhenKnown() {
+        activities.createShipment(new ShipmentWorkflowInput(shipmentId, merchantId, quoteId, "Ada", "+905551112233",
+                "Moda"), new QuoteInfo(1001, 800, 40.9, 29.1, 2500));
+        activities.createShipment(new ShipmentWorkflowInput(shipmentId, merchantId, quoteId, "Ada", "+905551112233",
+                "Moda"), new QuoteInfo(1001, 800, 40.9, 29.1));
+
+        ArgumentCaptor<CreateShipmentRequest> request = ArgumentCaptor.forClass(CreateShipmentRequest.class);
+        verify(shipments, times(2)).createShipment(request.capture());
+        assertThat(request.getAllValues().get(0).getWeightGrams()).isEqualTo(2500);
+        assertThat(request.getAllValues().get(1).hasWeightGrams()).isFalse();
+    }
+
+    @Test
     void businessErrors_areNotRetried() {
         when(shipments.createShipment(any(CreateShipmentRequest.class)))
                 .thenThrow(Status.INVALID_ARGUMENT.withDescription("bad phone").asRuntimeException());

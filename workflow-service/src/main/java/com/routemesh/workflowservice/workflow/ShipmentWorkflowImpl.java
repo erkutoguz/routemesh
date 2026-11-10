@@ -10,7 +10,9 @@ import io.temporal.common.RetryOptions;
 import io.temporal.failure.ActivityFailure;
 import io.temporal.failure.ApplicationFailure;
 import io.temporal.failure.CanceledFailure;
+import io.temporal.failure.ChildWorkflowFailure;
 import io.temporal.workflow.CancellationScope;
+import io.temporal.workflow.ChildWorkflowOptions;
 import io.temporal.workflow.Saga;
 import io.temporal.workflow.Workflow;
 
@@ -45,6 +47,9 @@ public class ShipmentWorkflowImpl implements ShipmentWorkflow {
 
     private CheckoutInfo checkout;
     private boolean finished;
+    private boolean paid;
+    private boolean dispatchRequested;
+    private long lastDispatchVersion;
     private String failureReason = "workflow finished before a payment was created";
 
     @Override
@@ -79,9 +84,17 @@ public class ShipmentWorkflowImpl implements ShipmentWorkflow {
             saga.addCompensation(() -> compensations.reverseEscrow(input.shipmentId(), amount));
             activities.postEscrow(input.shipmentId(), amount);
             activities.markPaid(input.shipmentId());
+            paid = true;
+            if (Workflow.getVersion("dispatch-after-paid", Workflow.DEFAULT_VERSION, 1) == 1) {
+                awaitDispatch(input);
+            }
             finish();
             return new ShipmentWorkflowResult(ShipmentWorkflowResult.PAID, null, paymentId);
         } catch (CanceledFailure e) {
+            if (paid) {
+                finish();
+                throw e;
+            }
             failureReason = "workflow cancelled";
             CancellationScope detached = Workflow.newDetachedCancellationScope(saga::compensate);
             detached.run();
@@ -98,7 +111,36 @@ public class ShipmentWorkflowImpl implements ShipmentWorkflow {
         if (checkout == null) {
             throw ApplicationFailure.newFailure(failureReason, "CHECKOUT_UNAVAILABLE");
         }
-        return checkout;
+        return new CheckoutInfo(checkout.paymentId(), checkout.checkoutUrl(), paid);
+    }
+
+    @Override
+    public void readyForDispatch(long shipmentVersion) {
+        if (shipmentVersion > lastDispatchVersion) {
+            lastDispatchVersion = shipmentVersion;
+            dispatchRequested = true;
+        }
+    }
+
+    /** PAID sonrası gönderi hazır olunca dağıtımı başlatır; atama olana kadar her yeni hazır olayında yeniden dener. */
+    private void awaitDispatch(ShipmentWorkflowInput input) {
+        int attempt = 0;
+        while (true) {
+            Workflow.await(() -> dispatchRequested);
+            dispatchRequested = false;
+            DispatchWorkflow dispatch = Workflow.newChildWorkflowStub(DispatchWorkflow.class,
+                    ChildWorkflowOptions.newBuilder()
+                            .setWorkflowId("dispatch-" + input.shipmentId() + "-" + (++attempt))
+                            .build());
+            try {
+                DispatchResult result = dispatch.dispatch(new DispatchInput(input.shipmentId()));
+                if (DispatchResult.ASSIGNED.equals(result.outcome())) {
+                    return;
+                }
+            } catch (ChildWorkflowFailure e) {
+                Workflow.getLogger(ShipmentWorkflowImpl.class).warn("dispatch attempt {} failed", attempt, e);
+            }
+        }
     }
 
     private PaymentInfo awaitAuthorization(PaymentInfo payment, long deadline) {

@@ -70,12 +70,17 @@ public class ShipmentActivitiesImpl implements ShipmentActivities {
                 .setShipmentId(shipmentId.toString())
                 .build())).getQuote();
         return new QuoteInfo(redeemed.getFinalAmount().getAmountMinor(), redeemed.getBasePrice().getAmountMinor(),
-                redeemed.getDestination().getLatitude(), redeemed.getDestination().getLongitude());
+                redeemed.getDestination().getLatitude(), redeemed.getDestination().getLongitude(),
+                redeemed.getWeightGrams());
     }
 
     @Override
     public void createShipment(ShipmentWorkflowInput input, QuoteInfo quote) {
-        RpcErrors.call(() -> shipments.createShipment(CreateShipmentRequest.newBuilder()
+        CreateShipmentRequest.Builder builder = CreateShipmentRequest.newBuilder();
+        if (quote.weightGrams() > 0) {
+            builder.setWeightGrams(quote.weightGrams());
+        }
+        RpcErrors.call(() -> shipments.createShipment(builder
                 .setIdempotencyKey(key("create"))
                 .setShipmentId(input.shipmentId().toString())
                 .setMerchantId(input.merchantId().toString())

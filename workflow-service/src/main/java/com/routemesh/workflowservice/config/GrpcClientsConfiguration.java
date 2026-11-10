@@ -7,7 +7,9 @@ import org.springframework.grpc.client.GrpcChannelFactory;
 import org.springframework.grpc.client.interceptor.security.BearerTokenAuthenticationInterceptor;
 import org.springframework.web.client.RestClient;
 
+import com.routemesh.contracts.fleet.FleetServiceGrpc;
 import com.routemesh.contracts.ledger.LedgerServiceGrpc;
+import com.routemesh.contracts.location.LocationServiceGrpc;
 import com.routemesh.contracts.payment.PaymentServiceGrpc;
 import com.routemesh.contracts.pricing.PricingServiceGrpc;
 import com.routemesh.contracts.shipment.ShipmentServiceGrpc;
@@ -15,7 +17,7 @@ import com.routemesh.contracts.shipment.ShipmentServiceGrpc;
 import io.grpc.ClientInterceptor;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties({AuthProperties.class, TemporalProperties.class})
+@EnableConfigurationProperties({AuthProperties.class, TemporalProperties.class, DispatchProperties.class})
 class GrpcClientsConfiguration {
 
     @Bean
@@ -46,6 +48,20 @@ class GrpcClientsConfiguration {
     PaymentServiceGrpc.PaymentServiceBlockingStub paymentStub(GrpcChannelFactory channels,
             ClientInterceptor workflowTokenInterceptor) {
         return PaymentServiceGrpc.newBlockingStub(channels.createChannel("payment"))
+                .withInterceptors(workflowTokenInterceptor);
+    }
+
+    @Bean
+    LocationServiceGrpc.LocationServiceBlockingStub locationStub(GrpcChannelFactory channels,
+            ClientInterceptor workflowTokenInterceptor) {
+        return LocationServiceGrpc.newBlockingStub(channels.createChannel("location"))
+                .withInterceptors(workflowTokenInterceptor);
+    }
+
+    @Bean
+    FleetServiceGrpc.FleetServiceBlockingStub fleetStub(GrpcChannelFactory channels,
+            ClientInterceptor workflowTokenInterceptor) {
+        return FleetServiceGrpc.newBlockingStub(channels.createChannel("fleet"))
                 .withInterceptors(workflowTokenInterceptor);
     }
 

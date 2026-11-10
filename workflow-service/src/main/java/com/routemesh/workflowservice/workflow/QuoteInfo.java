@@ -4,5 +4,11 @@ public record QuoteInfo(
         long finalAmountMinor,
         long basePriceMinor,
         double destinationLatitude,
-        double destinationLongitude) {
+        double destinationLongitude,
+        long weightGrams) {
+
+    public QuoteInfo(long finalAmountMinor, long basePriceMinor, double destinationLatitude,
+            double destinationLongitude) {
+        this(finalAmountMinor, basePriceMinor, destinationLatitude, destinationLongitude, 0);
+    }
 }

@@ -79,6 +79,19 @@ class ShipmentGrpcServiceTest {
     }
 
     @Test
+    void weightGramsRoundTripsAndIsOptional() {
+        Shipment heavy = stub.createShipment(createRequest(key()).toBuilder().setWeightGrams(2500).build())
+                .getShipment();
+        Shipment unknown = stub.createShipment(createRequest(key())).getShipment();
+
+        assertThat(stub.getShipment(GetShipmentRequest.newBuilder().setShipmentId(heavy.getId()).build())
+                .getWeightGrams()).isEqualTo(2500);
+        assertThat(unknown.hasWeightGrams()).isFalse();
+        assertCode(() -> stub.createShipment(createRequest(key()).toBuilder().setWeightGrams(0).build()),
+                Status.Code.INVALID_ARGUMENT);
+    }
+
+    @Test
     void createShipment_sameRequestTwice_isReplayed() {
         CreateShipmentRequest request = createRequest(key());
 

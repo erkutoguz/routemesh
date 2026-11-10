@@ -19,5 +19,6 @@ public record Shipment(
         long basePriceMinor,
         String currency,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        Long weightGrams) {
 }

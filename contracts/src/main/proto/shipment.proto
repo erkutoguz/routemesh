@@ -46,6 +46,7 @@ message Shipment {
   routemesh.common.v1.Money base_price = 12;
   google.protobuf.Timestamp created_at = 13;
   google.protobuf.Timestamp updated_at = 14;
+  optional int64 weight_grams = 15;
 }
 
 message CreateShipmentRequest {
@@ -59,6 +60,7 @@ message CreateShipmentRequest {
   routemesh.common.v1.Money final_amount = 8;
   routemesh.common.v1.Money base_price = 9;
   optional string shipment_id = 10;
+  optional int64 weight_grams = 11;
 }
 
 message CreateShipmentResponse {

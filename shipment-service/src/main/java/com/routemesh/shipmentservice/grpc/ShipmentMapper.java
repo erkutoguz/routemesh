@@ -45,7 +45,8 @@ final class ShipmentMapper {
                 request.getFinalAmount().getAmountMinor(),
                 request.getBasePrice().getAmountMinor(),
                 request.getFinalAmount().getCurrency(),
-                request.hasShipmentId() ? parseUuid(request.getShipmentId(), "shipment_id") : null);
+                request.hasShipmentId() ? parseUuid(request.getShipmentId(), "shipment_id") : null,
+                request.hasWeightGrams() ? request.getWeightGrams() : null);
     }
 
     static TransitionCommand toCommand(TransitionStatusRequest request) {
@@ -93,6 +94,9 @@ final class ShipmentMapper {
                         .setUpdatedAt(timestamp(shipment.updatedAt()));
         if (shipment.courierId() != null) {
             builder.setCourierId(shipment.courierId().toString());
+        }
+        if (shipment.weightGrams() != null) {
+            builder.setWeightGrams(shipment.weightGrams());
         }
         return builder.build();
     }

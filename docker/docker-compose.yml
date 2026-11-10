@@ -81,7 +81,7 @@ services:
       - sh
       - -c
       - >
-        for topic in shipment.events ledger.events payment.events; do
+        for topic in shipment.events ledger.events payment.events fleet.events; do
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists
         --topic $$topic --partitions 3 --replication-factor 1 --config retention.ms=604800000 || exit 1;
         done
@@ -129,13 +129,13 @@ services:
       - sh
       - -c
       - >
-        for name in shipment-outbox ledger-outbox payment-outbox; do
+        for name in shipment-outbox ledger-outbox payment-outbox fleet-outbox; do
         curl -sf -X PUT -H 'Content-Type: application/json'
         --data @/connectors/$$name.json
         http://connect:8083/connectors/$$name/config > /dev/null || exit 1;
         done;
         sleep 5;
-        for name in shipment-outbox ledger-outbox payment-outbox; do
+        for name in shipment-outbox ledger-outbox payment-outbox fleet-outbox; do
         curl -s http://connect:8083/connectors/$$name/status; echo;
         [ "$$(curl -s http://connect:8083/connectors/$$name/status | grep -o RUNNING | wc -l)" -ge 2 ] || exit 1;
         done

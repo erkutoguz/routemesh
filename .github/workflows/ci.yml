@@ -34,6 +34,7 @@ jobs:
           - platform-security
           - api-gateway
           - workflow-service
+          - fleet-service
 
     name: Test ${{ matrix.service }}
 

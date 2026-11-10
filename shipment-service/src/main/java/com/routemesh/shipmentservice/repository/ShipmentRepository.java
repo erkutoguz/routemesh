@@ -27,7 +27,7 @@ public class ShipmentRepository {
 
     private static final String COLUMNS = "id, merchant_id, status, courier_id, version, recipient_name, "
             + "recipient_phone, delivery_address, delivery_latitude, delivery_longitude, quote_id, "
-            + "final_amount_minor, base_price_minor, currency, created_at, updated_at, request_hash";
+            + "final_amount_minor, base_price_minor, currency, created_at, updated_at, weight_grams, request_hash";
 
     private final JdbcClient jdbc;
 
@@ -59,9 +59,9 @@ public class ShipmentRepository {
     public Optional<Shipment> insert(CreateShipmentCommand command, String requestHash) {
         return jdbc.sql("INSERT INTO shipments (id, idempotency_key, request_hash, merchant_id, status, "
                         + "recipient_name, recipient_phone, delivery_address, delivery_latitude, "
-                        + "delivery_longitude, quote_id, final_amount_minor, base_price_minor, currency) "
+                        + "delivery_longitude, quote_id, final_amount_minor, base_price_minor, currency, weight_grams) "
                         + "VALUES (COALESCE(:id, gen_random_uuid()), :key, :hash, :merchant, 'PENDING_PAYMENT', :name, :phone, :address, :lat, :lon, "
-                        + ":quote, :finalAmount, :basePrice, :currency) "
+                        + ":quote, :finalAmount, :basePrice, :currency, :weight) "
                         + "ON CONFLICT (idempotency_key) DO NOTHING RETURNING " + COLUMNS)
                 .param("id", command.shipmentId(), Types.OTHER)
                 .param("key", command.idempotencyKey())
@@ -76,6 +76,7 @@ public class ShipmentRepository {
                 .param("finalAmount", command.finalAmountMinor())
                 .param("basePrice", command.basePriceMinor())
                 .param("currency", command.currency())
+                .param("weight", command.weightGrams(), Types.INTEGER)
                 .query((rs, rowNum) -> mapStored(rs).shipment())
                 .optional();
     }
@@ -177,6 +178,8 @@ public class ShipmentRepository {
     }
 
     private static StoredShipment mapStored(ResultSet rs) throws SQLException {
+        int weightGrams = rs.getInt("weight_grams");
+        Long weight = rs.wasNull() ? null : (long) weightGrams;
         Shipment shipment = new Shipment(
                 rs.getObject("id", UUID.class),
                 rs.getObject("merchant_id", UUID.class),
@@ -193,7 +196,8 @@ public class ShipmentRepository {
                 rs.getLong("base_price_minor"),
                 rs.getString("currency"),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+                rs.getObject("updated_at", OffsetDateTime.class).toInstant(),
+                weight);
         return new StoredShipment(shipment, rs.getString("request_hash"));
     }
 }

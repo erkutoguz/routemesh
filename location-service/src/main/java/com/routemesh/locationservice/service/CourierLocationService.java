@@ -7,7 +7,10 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 
 import com.routemesh.locationservice.config.LocationProperties;
+import com.routemesh.locationservice.kafka.ApproachPublisher;
+import com.routemesh.locationservice.kafka.TelemetryPublisher;
 import com.routemesh.locationservice.store.CourierLocationStore;
+import com.routemesh.locationservice.store.IngestResult;
 import com.routemesh.locationservice.store.NearbyCourier;
 
 @Service
@@ -22,10 +25,15 @@ public class CourierLocationService {
 
     private final CourierLocationStore store;
     private final LocationProperties properties;
+    private final ApproachPublisher approachPublisher;
+    private final TelemetryPublisher telemetryPublisher;
 
-    public CourierLocationService(CourierLocationStore store, LocationProperties properties) {
+    public CourierLocationService(CourierLocationStore store, LocationProperties properties,
+                                  ApproachPublisher approachPublisher, TelemetryPublisher telemetryPublisher) {
         this.store = store;
         this.properties = properties;
+        this.approachPublisher = approachPublisher;
+        this.telemetryPublisher = telemetryPublisher;
     }
 
     /**
@@ -43,7 +51,14 @@ public class CourierLocationService {
         }
         validateCoordinates(latitude, longitude);
 
-        return store.ingest(normalizedId, sessionEpoch, sequenceNumber, latitude, longitude);
+        IngestResult result = store.ingest(normalizedId, sessionEpoch, sequenceNumber, latitude, longitude);
+        if (result.accepted()) {
+            telemetryPublisher.offer(normalizedId, sessionEpoch, sequenceNumber, latitude, longitude);
+            if (result.hit() != null) {
+                approachPublisher.publish(result.hit(), latitude, longitude);
+            }
+        }
+        return result.accepted();
     }
 
     /**

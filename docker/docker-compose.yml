@@ -81,10 +81,12 @@ services:
       - sh
       - -c
       - >
-        for topic in shipment.events ledger.events payment.events fleet.events; do
+        for topic in shipment.events ledger.events payment.events fleet.events location.events; do
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists
         --topic $$topic --partitions 3 --replication-factor 1 --config retention.ms=604800000 || exit 1;
-        done
+        done;
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists
+        --topic courier.locations --partitions 6 --replication-factor 1 --config retention.ms=3600000 || exit 1
 
   connect:
     image: quay.io/debezium/connect:3.7.1.Final

@@ -9,6 +9,7 @@ import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
 import com.routemesh.locationservice.config.LocationProperties;
+import com.routemesh.locationservice.config.TrackingProperties;
 
 @Component
 public class RedisCourierLocationStore implements CourierLocationStore {
@@ -16,13 +17,27 @@ public class RedisCourierLocationStore implements CourierLocationStore {
     static final String GEO_KEY = "courier:geo";
     static final String STATE_KEY_PREFIX = "courier:state:";
     static final String LASTSEEN_KEY = "courier:lastseen";
+    static final String WATCH_KEY_PREFIX = "courier:watch:";
+    static final String SHIPMENT_INDEX_PREFIX = "watch:shipment:";
+    static final String DONE_KEY_PREFIX = "watch:done:";
     static final int EVICTION_BATCH_SIZE = 1000;
 
     private final StringRedisTemplate redis;
     private final LocationProperties properties;
+    private final TrackingProperties tracking;
 
-    private final RedisScript<Long> ingestScript =
-            RedisScript.of(new ClassPathResource("redis/ingest.lua"), Long.class);
+    @SuppressWarnings("rawtypes")
+    private final RedisScript<List> ingestScript =
+            RedisScript.of(new ClassPathResource("redis/ingest.lua"), List.class);
+
+    private final RedisScript<Long> armWatchScript =
+            RedisScript.of(new ClassPathResource("redis/arm_watch.lua"), Long.class);
+
+    private final RedisScript<Long> clearWatchScript =
+            RedisScript.of(new ClassPathResource("redis/clear_watch.lua"), Long.class);
+
+    private final RedisScript<Long> rearmWatchScript =
+            RedisScript.of(new ClassPathResource("redis/rearm_watch.lua"), Long.class);
 
     private final RedisScript<Long> evictStaleScript =
             RedisScript.of(new ClassPathResource("redis/evict_stale.lua"), Long.class);
@@ -31,24 +46,67 @@ public class RedisCourierLocationStore implements CourierLocationStore {
     private final RedisScript<List> findNearestScript =
             RedisScript.of(new ClassPathResource("redis/find_nearest.lua"), List.class);
 
-    public RedisCourierLocationStore(StringRedisTemplate redis, LocationProperties properties) {
+    public RedisCourierLocationStore(StringRedisTemplate redis, LocationProperties properties,
+                                     TrackingProperties tracking) {
         this.redis = redis;
         this.properties = properties;
+        this.tracking = tracking;
     }
 
     @Override
-    public boolean ingest(String courierId, long sessionEpoch, long sequenceNumber,
-                          double latitude, double longitude) {
-        Long result = redis.execute(
+    public IngestResult ingest(String courierId, long sessionEpoch, long sequenceNumber,
+                               double latitude, double longitude) {
+        List<?> result = redis.execute(
                 ingestScript,
-                List.of(GEO_KEY, STATE_KEY_PREFIX + courierId, LASTSEEN_KEY),
+                List.of(GEO_KEY, STATE_KEY_PREFIX + courierId, LASTSEEN_KEY, WATCH_KEY_PREFIX + courierId),
                 courierId,
                 String.valueOf(sessionEpoch),
                 String.valueOf(sequenceNumber),
                 String.valueOf(longitude),
                 String.valueOf(latitude),
                 String.valueOf(properties.stateTtl().toMillis()));
+        if (result == null || result.isEmpty() || ((Number) result.get(0)).longValue() == 0L) {
+            return IngestResult.STALE;
+        }
+        if (((Number) result.get(0)).longValue() == 1L) {
+            return IngestResult.ACCEPTED;
+        }
+        return new IngestResult(true, new ProximityHit(courierId, result.get(2).toString(),
+                result.get(3).toString(), Double.parseDouble(result.get(1).toString())));
+    }
+
+    @Override
+    public boolean armWatch(Watch watch) {
+        long ttl = tracking.watchTtl().toMillis();
+        Long result = redis.execute(
+                armWatchScript,
+                List.of(WATCH_KEY_PREFIX + watch.courierId(), SHIPMENT_INDEX_PREFIX + watch.shipmentId(),
+                        DONE_KEY_PREFIX + watch.shipmentId()),
+                watch.shipmentId(),
+                watch.courierId(),
+                watch.kind(),
+                String.valueOf(watch.latitude()),
+                String.valueOf(watch.longitude()),
+                String.valueOf(tracking.approachRadiusMeters()),
+                watch.merchantId(),
+                String.valueOf(watch.version()),
+                String.valueOf(ttl));
         return result != null && result == 1L;
+    }
+
+    @Override
+    public void clearWatch(String shipmentId) {
+        redis.execute(
+                clearWatchScript,
+                List.of(SHIPMENT_INDEX_PREFIX + shipmentId, DONE_KEY_PREFIX + shipmentId),
+                shipmentId,
+                String.valueOf(tracking.doneTtl().toMillis()),
+                WATCH_KEY_PREFIX);
+    }
+
+    @Override
+    public void rearm(ProximityHit hit) {
+        redis.execute(rearmWatchScript, List.of(WATCH_KEY_PREFIX + hit.courierId()), hit.shipmentId(), hit.kind());
     }
 
     @Override

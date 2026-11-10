@@ -34,7 +34,7 @@ import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 
-@SpringBootTest
+@SpringBootTest(properties = {"routemesh.tracking.consumer-enabled=false", "routemesh.tracking.telemetry-enabled=false"})
 @Import({TestcontainersConfiguration.class, TestJwtConfiguration.class})
 @AutoConfigureTestGrpcTransport
 class LocationGrpcServiceTest {

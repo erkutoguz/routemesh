@@ -394,6 +394,29 @@ class ShipmentServiceTest {
         assertThat(count("shipments WHERE idempotency_key = ?", command.idempotencyKey())).isEqualTo(1);
     }
 
+    @Test
+    void weightIsStoredWhenGivenAndRejectedWhenNotPositive() {
+        assertThat(service.create(withWeight(newCommand(key()), 2500L)).shipment().weightGrams()).isEqualTo(2500L);
+        assertThat(service.create(newCommand(key())).shipment().weightGrams()).isNull();
+
+        assertReason(() -> service.create(withWeight(newCommand(key()), 0L)), Reason.INVALID_REQUEST);
+        assertReason(() -> service.create(withWeight(newCommand(key()), Integer.MAX_VALUE + 1L)),
+                Reason.INVALID_REQUEST);
+    }
+
+    @Test
+    void systemCanPutReadyShipmentOnHold() {
+        UUID id = shipmentIn(ShipmentStatus.READY_FOR_DISPATCH);
+
+        assertThat(move(id, ShipmentStatus.ON_HOLD, Actor.SYSTEM).status()).isEqualTo(ShipmentStatus.ON_HOLD);
+    }
+
+    private static CreateShipmentCommand withWeight(CreateShipmentCommand c, Long weightGrams) {
+        return new CreateShipmentCommand(c.idempotencyKey(), c.merchantId(), c.recipientName(), c.recipientPhone(),
+                c.deliveryAddress(), c.deliveryLatitude(), c.deliveryLongitude(), c.quoteId(),
+                c.finalAmountMinor(), c.basePriceMinor(), c.currency(), null, weightGrams);
+    }
+
     private UUID shipmentIn(ShipmentStatus target) {
         if (target == ShipmentStatus.PENDING_PAYMENT) {
             return service.create(newCommand(key())).shipment().id();

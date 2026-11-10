@@ -36,7 +36,7 @@ class ShipmentSchemaTest {
     @Test
     void statusesAndTransitionsAreSeeded() {
         assertThat(count("shipment_statuses")).isEqualTo(13);
-        assertThat(count("shipment_transitions")).isEqualTo(30);
+        assertThat(count("shipment_transitions")).isEqualTo(31);
         assertThat(count("shipment_transitions WHERE requires_pod")).isEqualTo(1);
     }
 

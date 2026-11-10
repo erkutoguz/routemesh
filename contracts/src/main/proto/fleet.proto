@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package routemesh.fleet.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "com.routemesh.contracts.fleet";
+
+service FleetService {
+  rpc CreateOffer(CreateOfferRequest) returns (CreateOfferResponse);
+  rpc GetOffer(GetOfferRequest) returns (Offer);
+  rpc ExpireOffer(ExpireOfferRequest) returns (Offer);
+  rpc ReleaseCourier(ReleaseCourierRequest) returns (ReleaseCourierResponse);
+}
+
+enum OfferStatus {
+  OFFER_STATUS_UNSPECIFIED = 0;
+  OFFER_STATUS_OFFERED = 1;
+  OFFER_STATUS_ACCEPTED = 2;
+  OFFER_STATUS_REJECTED = 3;
+  OFFER_STATUS_EXPIRED = 4;
+  OFFER_STATUS_RELEASED = 5;
+}
+
+message Offer {
+  string offer_id = 1;
+  string shipment_id = 2;
+  string courier_id = 3;
+  OfferStatus status = 4;
+  int64 weight_grams = 5;
+  int64 fence_token = 6;
+  google.protobuf.Timestamp expires_at = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp decided_at = 9;
+}
+
+message CreateOfferRequest {
+  string offer_id = 1;
+  string shipment_id = 2;
+  string courier_id = 3;
+  int64 weight_grams = 4;
+  int32 ttl_seconds = 5;
+}
+
+message CreateOfferResponse {
+  Offer offer = 1;
+  bool replayed = 2;
+}
+
+message GetOfferRequest {
+  string offer_id = 1;
+}
+
+message ExpireOfferRequest {
+  string offer_id = 1;
+}
+
+message ReleaseCourierRequest {
+  string courier_id = 1;
+  string shipment_id = 2;
+}
+
+message ReleaseCourierResponse {
+  bool released = 1;
+}

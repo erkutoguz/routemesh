@@ -207,6 +207,9 @@ public class ShipmentService {
         if (!CURRENCY.equals(command.currency())) {
             throw invalid("currency must be " + CURRENCY);
         }
+        if (command.weightGrams() != null && (command.weightGrams() <= 0 || command.weightGrams() > Integer.MAX_VALUE)) {
+            throw invalid("weight_grams must be between 1 and " + Integer.MAX_VALUE);
+        }
     }
 
     private void validate(TransitionCommand command) {
@@ -232,7 +235,8 @@ public class ShipmentService {
         return sha256(String.join("|", String.valueOf(c.merchantId()), c.recipientName(), c.recipientPhone(),
                 c.deliveryAddress(), String.valueOf(c.deliveryLatitude()), String.valueOf(c.deliveryLongitude()),
                 String.valueOf(c.quoteId()), String.valueOf(c.finalAmountMinor()),
-                String.valueOf(c.basePriceMinor()), c.currency(), String.valueOf(c.shipmentId())));
+                String.valueOf(c.basePriceMinor()), c.currency(), String.valueOf(c.shipmentId()),
+                String.valueOf(c.weightGrams())));
     }
 
     private static String hash(TransitionCommand c) {

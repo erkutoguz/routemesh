@@ -15,9 +15,10 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 
 import com.routemesh.locationservice.TestcontainersConfiguration;
 import com.routemesh.locationservice.config.LocationProperties;
+import com.routemesh.locationservice.config.TrackingProperties;
 
 @DataRedisTest
-@EnableConfigurationProperties(LocationProperties.class)
+@EnableConfigurationProperties({LocationProperties.class, TrackingProperties.class})
 @Import({TestcontainersConfiguration.class, RedisCourierLocationStore.class})
 class RedisCourierLocationStoreTest {
 
@@ -40,42 +41,42 @@ class RedisCourierLocationStoreTest {
 
     @Test
     void ingest_firstPacket_isAccepted() {
-        assertThat(store.ingest("c1", 1, 5, TARGET_LAT, TARGET_LON)).isTrue();
+        assertThat(store.ingest("c1", 1, 5, TARGET_LAT, TARGET_LON).accepted()).isTrue();
     }
 
     @Test
     void ingest_sameSequence_isRejected() {
         store.ingest("c1", 1, 5, TARGET_LAT, TARGET_LON);
 
-        assertThat(store.ingest("c1", 1, 5, TARGET_LAT, TARGET_LON)).isFalse();
+        assertThat(store.ingest("c1", 1, 5, TARGET_LAT, TARGET_LON).accepted()).isFalse();
     }
 
     @Test
     void ingest_lowerSequence_isRejected() {
         store.ingest("c1", 1, 5, TARGET_LAT, TARGET_LON);
 
-        assertThat(store.ingest("c1", 1, 4, TARGET_LAT, TARGET_LON)).isFalse();
+        assertThat(store.ingest("c1", 1, 4, TARGET_LAT, TARGET_LON).accepted()).isFalse();
     }
 
     @Test
     void ingest_higherSequence_isAccepted() {
         store.ingest("c1", 1, 5, TARGET_LAT, TARGET_LON);
 
-        assertThat(store.ingest("c1", 1, 6, TARGET_LAT, TARGET_LON)).isTrue();
+        assertThat(store.ingest("c1", 1, 6, TARGET_LAT, TARGET_LON).accepted()).isTrue();
     }
 
     @Test
     void ingest_newEpoch_isAcceptedEvenWithLowerSequence() {
         store.ingest("c1", 1, 99, TARGET_LAT, TARGET_LON);
 
-        assertThat(store.ingest("c1", 2, 1, TARGET_LAT, TARGET_LON)).isTrue();
+        assertThat(store.ingest("c1", 2, 1, TARGET_LAT, TARGET_LON).accepted()).isTrue();
     }
 
     @Test
     void ingest_olderEpoch_isRejected() {
         store.ingest("c1", 2, 1, TARGET_LAT, TARGET_LON);
 
-        assertThat(store.ingest("c1", 1, 99, TARGET_LAT, TARGET_LON)).isFalse();
+        assertThat(store.ingest("c1", 1, 99, TARGET_LAT, TARGET_LON).accepted()).isFalse();
     }
 
     @Test
@@ -160,7 +161,7 @@ class RedisCourierLocationStoreTest {
 
         store.evictStale();
 
-        assertThat(store.ingest("c1", 1, 5, TARGET_LAT, TARGET_LON)).isFalse();
+        assertThat(store.ingest("c1", 1, 5, TARGET_LAT, TARGET_LON).accepted()).isFalse();
     }
 
     @Test

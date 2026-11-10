@@ -19,35 +19,56 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import com.routemesh.locationservice.config.LocationProperties;
+import com.routemesh.locationservice.kafka.ApproachPublisher;
+import com.routemesh.locationservice.kafka.TelemetryPublisher;
 import com.routemesh.locationservice.store.CourierLocationStore;
+import com.routemesh.locationservice.store.IngestResult;
 import com.routemesh.locationservice.store.NearbyCourier;
+import com.routemesh.locationservice.store.ProximityHit;
 
 class CourierLocationServiceTest {
 
     private static final String VALID_ID = "123e4567-e89b-12d3-a456-426614174000";
 
     private final CourierLocationStore store = mock(CourierLocationStore.class);
+    private final ApproachPublisher approach = mock(ApproachPublisher.class);
+    private final TelemetryPublisher telemetry = mock(TelemetryPublisher.class);
     private final CourierLocationService service = new CourierLocationService(
-            store, new LocationProperties(Duration.ofSeconds(60), Duration.ofHours(24), 20, 100, 15000));
+            store, new LocationProperties(Duration.ofSeconds(60), Duration.ofHours(24), 20, 100, 15000),
+            approach, telemetry);
 
     // --- ingest ---
 
     @Test
-    void ingest_validPacket_isForwardedToStore() {
-        when(store.ingest(VALID_ID, 1, 5, 41.0, 29.0)).thenReturn(true);
+    void ingest_validPacket_isForwardedToStoreAndTelemetry() {
+        when(store.ingest(VALID_ID, 1, 5, 41.0, 29.0)).thenReturn(IngestResult.ACCEPTED);
 
         assertThat(service.ingest(VALID_ID, 1, 5, 41.0, 29.0)).isTrue();
+        verify(telemetry).offer(VALID_ID, 1, 5, 41.0, 29.0);
+        verifyNoInteractions(approach);
     }
 
     @Test
-    void ingest_storeRejectsStalePacket_returnsFalse() {
-        when(store.ingest(VALID_ID, 1, 5, 41.0, 29.0)).thenReturn(false);
+    void ingest_storeRejectsStalePacket_returnsFalseAndPublishesNothing() {
+        when(store.ingest(VALID_ID, 1, 5, 41.0, 29.0)).thenReturn(IngestResult.STALE);
 
         assertThat(service.ingest(VALID_ID, 1, 5, 41.0, 29.0)).isFalse();
+        verifyNoInteractions(telemetry, approach);
+    }
+
+    @Test
+    void ingest_packetThatTriggersProximity_publishesTheApproachEvent() {
+        ProximityHit hit = new ProximityHit(VALID_ID, "shipment-1", "DELIVERY", 82.4);
+        when(store.ingest(VALID_ID, 1, 5, 41.0, 29.0)).thenReturn(new IngestResult(true, hit));
+
+        assertThat(service.ingest(VALID_ID, 1, 5, 41.0, 29.0)).isTrue();
+        verify(approach).publish(hit, 41.0, 29.0);
     }
 
     @Test
     void ingest_upperCaseUuid_isNormalizedToLowerCase() {
+        when(store.ingest(VALID_ID, 1, 5, 41.0, 29.0)).thenReturn(IngestResult.ACCEPTED);
+
         service.ingest(VALID_ID.toUpperCase(), 1, 5, 41.0, 29.0);
 
         verify(store).ingest(VALID_ID, 1, 5, 41.0, 29.0);

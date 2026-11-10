@@ -12,6 +12,8 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.nimbusds.jose.JWSAlgorithm;
@@ -46,6 +48,10 @@ class ApiGatewayIntegrationTest {
     private static final AtomicReference<String> workflowCall = new AtomicReference<>();
     private static final HttpServer WORKFLOW_UPSTREAM = startWorkflowUpstream();
 
+    private static final CountDownLatch RELEASE_SECOND_EVENT = new CountDownLatch(1);
+    private static final AtomicReference<String> trackingCall = new AtomicReference<>();
+    private static final HttpServer TRACKING_UPSTREAM = startTrackingUpstream();
+
     private final HttpClient client = HttpClient.newHttpClient();
 
     @Value("${local.server.port}")
@@ -59,12 +65,16 @@ class ApiGatewayIntegrationTest {
         registry.add("routemesh.upstreams.shipment", () -> base);
         registry.add("routemesh.upstreams.workflow",
                 () -> "http://localhost:" + WORKFLOW_UPSTREAM.getAddress().getPort());
+        registry.add("routemesh.upstreams.tracking",
+                () -> "http://localhost:" + TRACKING_UPSTREAM.getAddress().getPort());
     }
 
     @AfterAll
     static void stopUpstream() {
+        RELEASE_SECOND_EVENT.countDown();
         UPSTREAM.stop(0);
         WORKFLOW_UPSTREAM.stop(0);
+        TRACKING_UPSTREAM.stop(0);
     }
 
     @BeforeEach
@@ -146,6 +156,41 @@ class ApiGatewayIntegrationTest {
     }
 
     @Test
+    void trackingStreamIsForwardedAsItIsProducedWithoutBuffering() throws Exception {
+        String token = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("MERCHANT"), 300);
+        HttpRequest request = HttpRequest
+                .newBuilder(URI.create("http://localhost:" + port + "/api/v1/tracking/abc/stream"))
+                .header("Accept", "text/event-stream").header("Authorization", "Bearer " + token).build();
+
+        HttpResponse<java.util.stream.Stream<String>> response =
+                client.send(request, HttpResponse.BodyHandlers.ofLines());
+        java.util.Iterator<String> lines = response.body().iterator();
+
+        // Upstream ikinci olayı yayınlamadı; ilk olay yine de istemciye ulaşmalı
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.headers().firstValue("content-type").orElse("")).startsWith("text/event-stream");
+        assertThat(response.headers().firstValue("x-accel-buffering")).contains("no");
+        assertThat(java.util.concurrent.CompletableFuture.supplyAsync(lines::next)
+                .get(5, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo("data:first");
+        assertThat(RELEASE_SECOND_EVENT.getCount()).isEqualTo(1);
+
+        RELEASE_SECOND_EVENT.countDown();
+        lines.next(); // boş satır
+        assertThat(java.util.concurrent.CompletableFuture.supplyAsync(lines::next)
+                .get(5, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo("data:second");
+        assertThat(trackingCall.get()).isEqualTo("/api/v1/tracking/abc/stream Bearer " + token);
+        response.body().close();
+    }
+
+    @Test
+    void trackingStreamWithoutTokenIsRejectedAtTheGateway() throws Exception {
+        trackingCall.set(null);
+
+        assertThat(get("/api/v1/tracking/abc/stream", null).statusCode()).isEqualTo(401);
+        assertThat(trackingCall.get()).isNull();
+    }
+
+    @Test
     void healthEndpointIsPublic() throws Exception {
         assertThat(get("/actuator/health", null).statusCode()).isEqualTo(200);
     }
@@ -199,6 +244,33 @@ class ApiGatewayIntegrationTest {
                 exchange.getResponseHeaders().add("Content-Type", "application/json");
                 exchange.sendResponseHeaders(200, body.length);
                 exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            server.start();
+            return server;
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static HttpServer startTrackingUpstream() {
+        try {
+            HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+            server.createContext("/", exchange -> {
+                trackingCall.set(exchange.getRequestURI().getPath() + " "
+                        + exchange.getRequestHeaders().getFirst("Authorization"));
+                exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+                exchange.getResponseHeaders().add("Cache-Control", "no-cache");
+                exchange.getResponseHeaders().add("X-Accel-Buffering", "no");
+                exchange.sendResponseHeaders(200, 0); // parçalı yanıt
+                try {
+                    exchange.getResponseBody().write("data:first\n\n".getBytes(StandardCharsets.UTF_8));
+                    exchange.getResponseBody().flush();
+                    RELEASE_SECOND_EVENT.await(30, TimeUnit.SECONDS);
+                    exchange.getResponseBody().write("data:second\n\n".getBytes(StandardCharsets.UTF_8));
+                    exchange.getResponseBody().flush();
+                } catch (IOException | InterruptedException ignored) {
+                }
                 exchange.close();
             });
             server.start();

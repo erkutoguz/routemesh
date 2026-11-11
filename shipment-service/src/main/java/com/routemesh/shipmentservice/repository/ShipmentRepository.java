@@ -16,6 +16,7 @@ import org.springframework.stereotype.Repository;
 import com.routemesh.shipmentservice.domain.Actor;
 import com.routemesh.shipmentservice.domain.CreateShipmentCommand;
 import com.routemesh.shipmentservice.domain.HistoryEntry;
+import com.routemesh.shipmentservice.domain.Milestones;
 import com.routemesh.shipmentservice.domain.Shipment;
 import com.routemesh.shipmentservice.domain.ShipmentStatus;
 
@@ -139,6 +140,20 @@ public class ShipmentRepository {
                         rs.getLong("version"),
                         rs.getTimestamp("created_at").toInstant()))
                 .list();
+    }
+
+    public Milestones findMilestones(UUID shipmentId) {
+        return jdbc.sql("SELECT min(created_at) FILTER (WHERE to_status = 'AT_WAREHOUSE') AS received, "
+                        + "max(created_at) FILTER (WHERE to_status = 'DELIVERED') AS delivered "
+                        + "FROM shipment_status_history WHERE shipment_id = :id")
+                .param("id", shipmentId)
+                .query((rs, n) -> new Milestones(instant(rs, "received"), instant(rs, "delivered")))
+                .single();
+    }
+
+    private static Instant instant(ResultSet rs, String column) throws SQLException {
+        OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);
+        return value == null ? null : value.toInstant();
     }
 
     public void insertHistory(UUID shipmentId, String transitionKey, String requestHash, ShipmentStatus from,

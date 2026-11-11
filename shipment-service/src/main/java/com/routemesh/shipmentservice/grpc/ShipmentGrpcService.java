@@ -12,6 +12,7 @@ import com.routemesh.contracts.shipment.Shipment;
 import com.routemesh.contracts.shipment.ShipmentServiceGrpc;
 import com.routemesh.contracts.shipment.TransitionStatusRequest;
 import com.routemesh.contracts.shipment.TransitionStatusResponse;
+import com.routemesh.shipmentservice.domain.Milestones;
 import com.routemesh.shipmentservice.domain.ShipmentResult;
 import com.routemesh.shipmentservice.service.OtpService;
 import com.routemesh.shipmentservice.service.ShipmentException;
@@ -63,8 +64,16 @@ public class ShipmentGrpcService extends ShipmentServiceGrpc.ShipmentServiceImpl
     @Override
     public void getShipment(GetShipmentRequest request, StreamObserver<Shipment> observer) {
         try {
-            observer.onNext(ShipmentMapper.toProto(
-                    shipmentService.get(ShipmentMapper.parseUuid(request.getShipmentId(), "shipment_id"))));
+            java.util.UUID id = ShipmentMapper.parseUuid(request.getShipmentId(), "shipment_id");
+            Shipment.Builder shipment = ShipmentMapper.toProto(shipmentService.get(id)).toBuilder();
+            Milestones milestones = shipmentService.milestones(id);
+            if (milestones.warehouseReceivedAt() != null) {
+                shipment.setWarehouseReceivedAt(ShipmentMapper.timestamp(milestones.warehouseReceivedAt()));
+            }
+            if (milestones.deliveredAt() != null) {
+                shipment.setDeliveredAt(ShipmentMapper.timestamp(milestones.deliveredAt()));
+            }
+            observer.onNext(shipment.build());
             observer.onCompleted();
         } catch (ShipmentException e) {
             observer.onError(toStatus(e));

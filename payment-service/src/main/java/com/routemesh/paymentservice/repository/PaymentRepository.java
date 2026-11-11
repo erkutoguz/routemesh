@@ -53,6 +53,16 @@ public class PaymentRepository {
                 .optional();
     }
 
+    /** Gönderinin yakalanmış (ya da sonradan iade edilmiş) en son ödemesi. */
+    public Optional<PaymentIntent> findCapturedIntentByShipment(UUID shipmentId) {
+        return jdbc.sql("SELECT " + INTENT_COLUMNS + " FROM payment_intents WHERE shipment_id = :shipment "
+                        + "AND status IN ('CAPTURED', 'PARTIALLY_REFUNDED', 'REFUNDED') "
+                        + "ORDER BY created_at DESC LIMIT 1")
+                .param("shipment", shipmentId)
+                .query((rs, rowNum) -> mapStoredIntent(rs).intent())
+                .optional();
+    }
+
     public Optional<PaymentIntent> findIntentByIdForUpdate(UUID id) {
         return jdbc.sql("SELECT " + INTENT_COLUMNS + " FROM payment_intents WHERE id = :id FOR UPDATE")
                 .param("id", id)

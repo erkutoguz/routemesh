@@ -15,6 +15,8 @@ service PaymentService {
   rpc RefundPayment(RefundPaymentRequest) returns (PaymentCommandResponse);
   rpc ExpirePayment(ExpirePaymentRequest) returns (PaymentCommandResponse);
   rpc GetPayment(GetPaymentRequest) returns (PaymentIntent);
+  // Gönderinin ödemesi (yakalanmış/iade edilmiş en son kayıt); hakediş ve iade adımları kimliği buradan bulur.
+  rpc FindPaymentByShipment(FindPaymentByShipmentRequest) returns (PaymentIntent);
 }
 
 enum PaymentStatus {
@@ -79,4 +81,8 @@ message PaymentCommandResponse {
   PaymentIntent payment = 1;
   bool replayed = 2;
   bool pending = 3;
+}
+
+message FindPaymentByShipmentRequest {
+  string shipment_id = 1;
 }

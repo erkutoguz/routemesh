@@ -183,6 +183,12 @@ public class PaymentService {
         return repository.findIntentById(paymentId).orElseThrow(() -> notFound(paymentId));
     }
 
+    public PaymentIntent findCapturedByShipment(UUID shipmentId) {
+        return repository.findCapturedIntentByShipment(shipmentId)
+                .orElseThrow(() -> new PaymentException(Reason.NOT_FOUND,
+                        "no captured payment for shipment " + shipmentId));
+    }
+
     private CommandResult finish(Prepared prepared) {
         Outcome outcome = executor.execute(prepared.transaction().id());
         PaymentIntent intent = repository.findIntentById(prepared.transaction().intentId()).orElseThrow();

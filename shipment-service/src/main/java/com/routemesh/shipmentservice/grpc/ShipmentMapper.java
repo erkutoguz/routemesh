@@ -113,7 +113,7 @@ final class ShipmentMapper {
         return Money.newBuilder().setAmountMinor(amountMinor).setCurrency(currency);
     }
 
-    private static Timestamp timestamp(Instant instant) {
+    static Timestamp timestamp(Instant instant) {
         return Timestamp.newBuilder().setSeconds(instant.getEpochSecond()).setNanos(instant.getNano()).build();
     }
 

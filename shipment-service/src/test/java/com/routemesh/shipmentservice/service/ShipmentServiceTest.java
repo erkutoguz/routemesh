@@ -214,6 +214,29 @@ class ShipmentServiceTest {
     }
 
     @Test
+    void milestones_reportTheFirstWarehouseReceiptAndTheDelivery() {
+        UUID id = shipmentIn(ShipmentStatus.PAID);
+        assertThat(service.milestones(id).warehouseReceivedAt()).isNull();
+        assertThat(service.milestones(id).deliveredAt()).isNull();
+
+        move(id, ShipmentStatus.AT_WAREHOUSE, Actor.WAREHOUSE);
+        var received = service.milestones(id).warehouseReceivedAt();
+        assertThat(received).isNotNull();
+        assertThat(service.milestones(id).deliveredAt()).isNull();
+
+        move(id, ShipmentStatus.READY_FOR_DISPATCH, Actor.WAREHOUSE);
+        service.transition(new TransitionCommand(id, ShipmentStatus.ASSIGNED, Actor.SYSTEM, UUID.randomUUID().toString(),
+                null, UUID.randomUUID(), null));
+        move(id, ShipmentStatus.OUT_FOR_DELIVERY, Actor.COURIER);
+        addProofOfDelivery(id);
+        move(id, ShipmentStatus.DELIVERED, Actor.COURIER);
+
+        var milestones = service.milestones(id);
+        assertThat(milestones.warehouseReceivedAt()).isEqualTo(received);
+        assertThat(milestones.deliveredAt()).isAfterOrEqualTo(received);
+    }
+
+    @Test
     void everyStatusAndActorCombination_followsTheTransitionTable() {
         Set<String> allowed = new HashSet<>(jdbc.queryForList(
                 "SELECT from_status || '>' || to_status || '>' || actor FROM shipment_transitions", String.class));

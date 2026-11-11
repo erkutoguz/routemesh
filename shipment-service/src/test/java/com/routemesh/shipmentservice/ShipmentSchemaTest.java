@@ -41,6 +41,16 @@ class ShipmentSchemaTest {
     }
 
     @Test
+    void appRoleCanRunGeographyProximityChecks() {
+        // 0,00085 enlem derecesi ~94,5 m: 100 m yarıçapta içeride, 50 m yarıçapta dışarıda
+        String within = "SELECT ST_DWithin(ST_SetSRID(ST_MakePoint(29.0, 41.00085), 4326)::geography, "
+                + "ST_SetSRID(ST_MakePoint(29.0, 41.0), 4326)::geography, ?)";
+
+        assertThat(app.queryForObject(within, Boolean.class, 100)).isTrue();
+        assertThat(app.queryForObject(within, Boolean.class, 50)).isFalse();
+    }
+
+    @Test
     void terminalStatusesHaveNoOutgoingTransitions() {
         Integer outgoing = owner.queryForObject(
                 "SELECT count(*) FROM shipment_transitions t JOIN shipment_statuses s ON s.code = t.from_status "

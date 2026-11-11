@@ -13,7 +13,8 @@ public class TestcontainersConfiguration {
     @ServiceConnection
     @SuppressWarnings("resource")
     PostgreSQLContainer postgresContainer() {
-        return new PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"))
+        return new PostgreSQLContainer(
+                DockerImageName.parse("postgis/postgis:16-3.7-alpine").asCompatibleSubstituteFor("postgres"))
                 .withDatabaseName("shipment")
                 .withUsername("shipment_owner")
                 .withPassword("shipment_owner_dev")

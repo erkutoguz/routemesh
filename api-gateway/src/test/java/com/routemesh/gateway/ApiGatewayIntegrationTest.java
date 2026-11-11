@@ -119,6 +119,20 @@ class ApiGatewayIntegrationTest {
     }
 
     @Test
+    void warehousePathsGoToShipmentService() throws Exception {
+        String token = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("WAREHOUSE"), 300);
+
+        assertThat(send("POST", "/api/v1/warehouse/shipments/receive", token).statusCode()).isEqualTo(200);
+        assertThat(upstreamPath.get()).isEqualTo("/api/v1/warehouse/shipments/receive");
+        assertThat(upstreamAuthorization.get()).isEqualTo("Bearer " + token);
+        assertThat(workflowCall.get()).isNull();
+
+        upstreamPath.set(null);
+        assertThat(send("POST", "/api/v1/warehouse/shipments/1/ready", null).statusCode()).isEqualTo(401);
+        assertThat(upstreamPath.get()).isNull();
+    }
+
+    @Test
     void tokenWithWrongAudienceIsRejected() throws Exception {
         String token = token(SIGNING_KEY, ISSUER, List.of("account"), List.of("MERCHANT"), 300);
         assertThat(get("/api/v1/shipments/1", token).statusCode()).isEqualTo(401);

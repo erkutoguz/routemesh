@@ -222,8 +222,57 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_DEFAULT_NAMESPACE: routemesh
 
+  # S3 uyumlu nesne deposu (teslimat kanıtı fotoğrafları). Servisler yalnızca S3 API'sini kullanır, imaj değiştirilebilir.
+  # Docker Hub'daki minio/minio ve minio/mc depoları kaldırıldı; Chainguard kaynak koddan derlenen
+  # imajı kullanılır ve digest ile sabitlenir (-dev varyantı: sh ve wget sağlık denetimi/init için gerekli).
+  minio:
+    image: cgr.dev/chainguard/minio@sha256:99d9c9437fc6cefa47ea66eb0fbccfaa521272f5885fbd0520e0334415b767f7
+    container_name: routemesh-minio
+    entrypoint: ["minio"]
+    command: ["server", "/data", "--address", ":9100", "--console-address", ":9101"]
+    ports:
+      - "9100:9100"
+      - "9101:9101"
+    environment:
+      MINIO_ROOT_USER: minio_root
+      MINIO_ROOT_PASSWORD: minio_root_dev_secret
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9100/minio/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  # routemesh-pod bucket'ını (herkese kapalı) ve yalnızca bu bucket'a okuma/yazma yetkili servis kullanıcısını kurar.
+  # Silme yetkisi bilerek yok: teslimat kanıtı değişmezdir.
+  minio-init:
+    image: cgr.dev/chainguard/minio-client@sha256:11c116267e67aae889193021e0d7d5b7f611dc5ce688ae42b99f586dffd40316
+    container_name: routemesh-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      MINIO_ROOT_USER: minio_root
+      MINIO_ROOT_PASSWORD: minio_root_dev_secret
+      POD_ACCESS_KEY: shipment-pod
+      POD_SECRET_KEY: shipment_pod_dev_secret
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        mc alias set local http://minio:9100 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing local/routemesh-pod &&
+        mc anonymous set none local/routemesh-pod &&
+        printf '%s' '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject"],"Resource":["arn:aws:s3:::routemesh-pod/*"]},{"Effect":"Allow","Action":["s3:ListBucket","s3:GetBucketLocation"],"Resource":["arn:aws:s3:::routemesh-pod"]}]}' > /tmp/pod-policy.json &&
+        mc admin policy create local pod-readwrite /tmp/pod-policy.json &&
+        mc admin user add local "$$POD_ACCESS_KEY" "$$POD_SECRET_KEY" &&
+        mc admin policy attach local pod-readwrite --user "$$POD_ACCESS_KEY" || mc admin policy attach local pod-readwrite --user "$$POD_ACCESS_KEY" 2>&1 | grep -qi "already"
+
 volumes:
   redis-data:
   postgres-data:
   kafka-data:
   temporal-postgres-data:
+  minio-data:

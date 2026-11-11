@@ -51,6 +51,8 @@ class ApiGatewayIntegrationTest {
     private static final CountDownLatch RELEASE_SECOND_EVENT = new CountDownLatch(1);
     private static final AtomicReference<String> trackingCall = new AtomicReference<>();
     private static final HttpServer TRACKING_UPSTREAM = startTrackingUpstream();
+    private static final AtomicReference<String> ledgerCall = new AtomicReference<>();
+    private static final HttpServer LEDGER_UPSTREAM = startLedgerUpstream();
 
     private final HttpClient client = HttpClient.newHttpClient();
 
@@ -67,6 +69,8 @@ class ApiGatewayIntegrationTest {
                 () -> "http://localhost:" + WORKFLOW_UPSTREAM.getAddress().getPort());
         registry.add("routemesh.upstreams.tracking",
                 () -> "http://localhost:" + TRACKING_UPSTREAM.getAddress().getPort());
+        registry.add("routemesh.upstreams.ledger",
+                () -> "http://localhost:" + LEDGER_UPSTREAM.getAddress().getPort());
     }
 
     @AfterAll
@@ -75,6 +79,7 @@ class ApiGatewayIntegrationTest {
         UPSTREAM.stop(0);
         WORKFLOW_UPSTREAM.stop(0);
         TRACKING_UPSTREAM.stop(0);
+        LEDGER_UPSTREAM.stop(0);
     }
 
     @BeforeEach
@@ -197,6 +202,38 @@ class ApiGatewayIntegrationTest {
     }
 
     @Test
+    void walletPathsReachTheLedgerServiceWithTheCallersTokenUntouched() throws Exception {
+        for (String role : new String[] {"MERCHANT", "COURIER", "OPS"}) {
+            String token = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of(role), 300);
+            ledgerCall.set(null);
+
+            // Rol kararı ledger-service'in: gateway yalnızca kimliği doğrular ve token'ı aynen iletir
+            assertThat(get("/api/v1/wallets/me", token).statusCode()).isEqualTo(200);
+            assertThat(ledgerCall.get()).isEqualTo("/api/v1/wallets/me Bearer " + token);
+
+            ledgerCall.set(null);
+            assertThat(get("/api/v1/wallets/me/transactions?limit=2&cursor=17", token).statusCode()).isEqualTo(200);
+            assertThat(ledgerCall.get()).isEqualTo("/api/v1/wallets/me/transactions?limit=2&cursor=17 Bearer " + token);
+        }
+        assertThat(upstreamPath.get()).isNull();
+        assertThat(workflowCall.get()).isNull();
+    }
+
+    @Test
+    void walletPathsWithoutAValidTokenNeverReachTheLedgerService() throws Exception {
+        ledgerCall.set(null);
+        String wrongAudience = token(SIGNING_KEY, ISSUER, List.of("account"), List.of("MERCHANT"), 300);
+        String expired = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("MERCHANT"), -300);
+        String foreign = token(FOREIGN_KEY, ISSUER, List.of("routemesh-api"), List.of("MERCHANT"), 300);
+
+        assertThat(get("/api/v1/wallets/me", null).statusCode()).isEqualTo(401);
+        assertThat(get("/api/v1/wallets/me/transactions", wrongAudience).statusCode()).isEqualTo(401);
+        assertThat(get("/api/v1/wallets/me", expired).statusCode()).isEqualTo(401);
+        assertThat(get("/api/v1/wallets/me", foreign).statusCode()).isEqualTo(401);
+        assertThat(ledgerCall.get()).isNull();
+    }
+
+    @Test
     void trackingStreamWithoutTokenIsRejectedAtTheGateway() throws Exception {
         trackingCall.set(null);
 
@@ -253,6 +290,26 @@ class ApiGatewayIntegrationTest {
             HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
             server.createContext("/", exchange -> {
                 workflowCall.set(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath() + " "
+                        + exchange.getRequestHeaders().getFirst("Authorization"));
+                byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            server.start();
+            return server;
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static HttpServer startLedgerUpstream() {
+        try {
+            HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+            server.createContext("/", exchange -> {
+                String query = exchange.getRequestURI().getRawQuery();
+                ledgerCall.set(exchange.getRequestURI().getPath() + (query == null ? "" : "?" + query) + " "
                         + exchange.getRequestHeaders().getFirst("Authorization"));
                 byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json");

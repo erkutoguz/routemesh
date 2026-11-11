@@ -40,6 +40,92 @@ class ShipmentSchemaTest {
         assertThat(count("shipment_transitions WHERE requires_pod")).isEqualTo(1);
     }
 
+    // --- teslimat kanıtı (V5) ---
+
+    @Test
+    void proofOfDelivery_isRejectedBeyondFiftyMeters() {
+        UUID shipment = insertShipment("OUT_FOR_DELIVERY", UUID.randomUUID());
+        UUID photo = insertFile(shipment, "PHOTO");
+
+        assertThat(insertProof(shipment, photo, 50)).isEqualTo(1);
+        UUID other = insertShipment("OUT_FOR_DELIVERY", UUID.randomUUID());
+        UUID otherPhoto = insertFile(other, "PHOTO");
+        assertThatThrownBy(() -> insertProof(other, otherPhoto, 50.1))
+                .hasStackTraceContaining("proof_of_delivery_distance_check");
+    }
+
+    @Test
+    void proofOfDelivery_filesMustBelongToTheShipmentAndHaveTheRightKind() {
+        UUID shipment = insertShipment("OUT_FOR_DELIVERY", UUID.randomUUID());
+        UUID elsewhere = insertShipment("OUT_FOR_DELIVERY", UUID.randomUUID());
+        UUID signature = insertFile(shipment, "SIGNATURE");
+        UUID foreignPhoto = insertFile(elsewhere, "PHOTO");
+
+        assertThatThrownBy(() -> insertProof(shipment, signature, 5))
+                .hasStackTraceContaining("photo_file_id must reference a PHOTO file");
+        assertThatThrownBy(() -> insertProof(shipment, foreignPhoto, 5))
+                .hasStackTraceContaining("proof_of_delivery_photo_fk");
+    }
+
+    @Test
+    void proofOfDeliveryAndFiles_areImmutable() {
+        UUID shipment = insertShipment("OUT_FOR_DELIVERY", UUID.randomUUID());
+        UUID photo = insertFile(shipment, "PHOTO");
+        insertProof(shipment, photo, 5);
+
+        assertThatThrownBy(() -> owner.update("UPDATE proof_of_delivery SET recipient_name = 'x'"))
+                .hasStackTraceContaining("UPDATE on proof_of_delivery is not allowed");
+        assertThatThrownBy(() -> owner.update("DELETE FROM proof_of_delivery"))
+                .hasStackTraceContaining("DELETE on proof_of_delivery is not allowed");
+        assertThatThrownBy(() -> owner.update("UPDATE pod_files SET sha256 = repeat('b', 64)"))
+                .hasStackTraceContaining("UPDATE on pod_files is not allowed");
+        assertThatThrownBy(() -> owner.update("DELETE FROM pod_files"))
+                .hasStackTraceContaining("DELETE on pod_files is not allowed");
+    }
+
+    @Test
+    void podFiles_enforceSizeTypeAndKind() {
+        UUID shipment = insertShipment("OUT_FOR_DELIVERY", UUID.randomUUID());
+        String insert = "INSERT INTO pod_files (id, shipment_id, kind, object_key, sha256, size_bytes, content_type, "
+                + "uploaded_by) VALUES (gen_random_uuid(), ?, ?, ?, repeat('a', 64), ?, ?, gen_random_uuid())";
+
+        assertThatThrownBy(() -> owner.update(insert, shipment, "PHOTO", "k1", 5 * 1024 * 1024 + 1, "image/jpeg"))
+                .hasStackTraceContaining("pod_files_size_check");
+        assertThatThrownBy(() -> owner.update(insert, shipment, "PHOTO", "k2", 10, "image/gif"))
+                .hasStackTraceContaining("pod_files_content_type_check");
+        assertThatThrownBy(() -> owner.update(insert, shipment, "VIDEO", "k3", 10, "image/png"))
+                .hasStackTraceContaining("pod_files_kind_check");
+        assertThat(owner.update(insert, shipment, "PHOTO", "k4", 5 * 1024 * 1024, "image/png")).isEqualTo(1);
+    }
+
+    @Test
+    void deliveryOtp_allowsAtMostFiveAttempts_andAppRoleCannotDeleteIt() {
+        UUID shipment = insertShipment("OUT_FOR_DELIVERY", UUID.randomUUID());
+        owner.update("INSERT INTO delivery_otps (shipment_id, code_hash, expires_at) "
+                + "VALUES (?, 'h', now() + interval '1 day')", shipment);
+
+        assertThat(owner.update("UPDATE delivery_otps SET attempts = 5 WHERE shipment_id = ?", shipment)).isEqualTo(1);
+        assertThatThrownBy(() -> owner.update("UPDATE delivery_otps SET attempts = 6 WHERE shipment_id = ?", shipment))
+                .hasStackTraceContaining("delivery_otps_attempts_check");
+        assertThatThrownBy(() -> app.update("DELETE FROM delivery_otps WHERE shipment_id = ?", shipment))
+                .hasStackTraceContaining("permission denied");
+        assertThat(app.update("UPDATE delivery_otps SET attempts = 0 WHERE shipment_id = ?", shipment)).isEqualTo(1);
+    }
+
+    private UUID insertFile(UUID shipment, String kind) {
+        UUID id = UUID.randomUUID();
+        owner.update("INSERT INTO pod_files (id, shipment_id, kind, object_key, sha256, size_bytes, content_type, "
+                + "uploaded_by) VALUES (?, ?, ?, ?, repeat('a', 64), 10, 'image/jpeg', gen_random_uuid())",
+                id, shipment, kind, "pod/" + shipment + "/" + id);
+        return id;
+    }
+
+    private int insertProof(UUID shipment, UUID photo, double distanceMeters) {
+        return owner.update("INSERT INTO proof_of_delivery (shipment_id, courier_id, delivered_latitude, "
+                + "delivered_longitude, distance_meters, recipient_name, photo_file_id) "
+                + "VALUES (?, gen_random_uuid(), 41.0, 29.0, ?, 'Ada', ?)", shipment, distanceMeters, photo);
+    }
+
     @Test
     void appRoleCanRunGeographyProximityChecks() {
         // 0,00085 enlem derecesi ~94,5 m: 100 m yarıçapta içeride, 50 m yarıçapta dışarıda
@@ -127,7 +213,11 @@ class ShipmentSchemaTest {
                 .hasStackTraceContaining("permission denied");
         assertThatThrownBy(() -> app.update("DELETE FROM shipment_transitions"))
                 .hasStackTraceContaining("permission denied");
-        assertThatThrownBy(() -> app.update("INSERT INTO proof_of_delivery (shipment_id) VALUES (?)", id))
+        assertThatThrownBy(() -> app.update("UPDATE proof_of_delivery SET recipient_name = 'x'"))
+                .hasStackTraceContaining("permission denied");
+        assertThatThrownBy(() -> app.update("DELETE FROM proof_of_delivery"))
+                .hasStackTraceContaining("permission denied");
+        assertThatThrownBy(() -> app.update("DELETE FROM pod_files"))
                 .hasStackTraceContaining("permission denied");
     }
 

@@ -6,7 +6,16 @@ public class ShipmentException extends RuntimeException {
         INVALID_REQUEST,
         NOT_FOUND,
         ILLEGAL_TRANSITION,
-        IDEMPOTENCY_CONFLICT
+        IDEMPOTENCY_CONFLICT,
+        /** Bildirilen teslimat konumu hedeften 50 m'den uzak. */
+        POD_TOO_FAR,
+        /** Alıcı OTP'si yok ya da yanlış. */
+        OTP_INVALID,
+        /** OTP 5 hatalı denemeden sonra kilitli ya da süresi dolmuş; yenisi üretilmeli. */
+        OTP_LOCKED,
+        PAYLOAD_TOO_LARGE,
+        UNSUPPORTED_MEDIA,
+        STORAGE_UNAVAILABLE
     }
 
     private final Reason reason;

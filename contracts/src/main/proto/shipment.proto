@@ -12,6 +12,9 @@ service ShipmentService {
   rpc CreateShipment(CreateShipmentRequest) returns (CreateShipmentResponse);
   rpc TransitionStatus(TransitionStatusRequest) returns (TransitionStatusResponse);
   rpc GetShipment(GetShipmentRequest) returns (Shipment);
+  // Alıcı teslimat OTP'si üretir (varsa öncekini geçersiz kılar). Kod yalnızca bu yanıtta görünür;
+  // serviste HMAC olarak saklanır, olaylara girmez. Çağıran (notification-service) alıcıya iletir.
+  rpc IssueDeliveryOtp(IssueDeliveryOtpRequest) returns (IssueDeliveryOtpResponse);
 }
 
 enum ShipmentStatus {
@@ -86,4 +89,13 @@ message TransitionStatusResponse {
 
 message GetShipmentRequest {
   string shipment_id = 1;
+}
+
+message IssueDeliveryOtpRequest {
+  string shipment_id = 1;
+}
+
+message IssueDeliveryOtpResponse {
+  string code = 1;
+  google.protobuf.Timestamp expires_at = 2;
 }

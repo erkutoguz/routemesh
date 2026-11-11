@@ -19,6 +19,8 @@ import com.routemesh.contracts.common.Money;
 import com.routemesh.contracts.shipment.CreateShipmentRequest;
 import com.routemesh.contracts.shipment.CreateShipmentResponse;
 import com.routemesh.contracts.shipment.GetShipmentRequest;
+import com.routemesh.contracts.shipment.IssueDeliveryOtpRequest;
+import com.routemesh.contracts.shipment.IssueDeliveryOtpResponse;
 import com.routemesh.contracts.shipment.Shipment;
 import com.routemesh.contracts.shipment.ShipmentServiceGrpc;
 import com.routemesh.contracts.shipment.ShipmentStatus;
@@ -89,6 +91,44 @@ class ShipmentGrpcServiceTest {
         assertThat(unknown.hasWeightGrams()).isFalse();
         assertCode(() -> stub.createShipment(createRequest(key()).toBuilder().setWeightGrams(0).build()),
                 Status.Code.INVALID_ARGUMENT);
+    }
+
+    @Test
+    void issueDeliveryOtp_returnsASixDigitCodeWithExpiry() {
+        String id = stub.createShipment(createRequest(key())).getShipment().getId();
+        long now = java.time.Instant.now().getEpochSecond();
+
+        IssueDeliveryOtpResponse issued = stub.issueDeliveryOtp(
+                IssueDeliveryOtpRequest.newBuilder().setShipmentId(id).build());
+
+        assertThat(issued.getCode()).matches("\\d{6}");
+        assertThat(issued.getExpiresAt().getSeconds()).isBetween(now + 23 * 3600, now + 25 * 3600);
+    }
+
+    @Test
+    void issueDeliveryOtp_unknownInvalidAndFinishedShipments_areRejected() {
+        assertCode(() -> stub.issueDeliveryOtp(IssueDeliveryOtpRequest.newBuilder()
+                .setShipmentId(UUID.randomUUID().toString()).build()), Status.Code.NOT_FOUND);
+        assertCode(() -> stub.issueDeliveryOtp(IssueDeliveryOtpRequest.newBuilder().setShipmentId("x").build()),
+                Status.Code.INVALID_ARGUMENT);
+
+        String id = stub.createShipment(createRequest(key())).getShipment().getId();
+        shipmentService.transition(new TransitionCommand(UUID.fromString(id),
+                com.routemesh.shipmentservice.domain.ShipmentStatus.CANCELLED, Actor.SYSTEM, key(), null, null, null));
+        assertCode(() -> stub.issueDeliveryOtp(IssueDeliveryOtpRequest.newBuilder().setShipmentId(id).build()),
+                Status.Code.FAILED_PRECONDITION);
+    }
+
+    @Test
+    void issueDeliveryOtp_requiresTheWorkflowRole() {
+        String id = stub.createShipment(createRequest(key())).getShipment().getId();
+        for (String role : new String[] {"MERCHANT", "COURIER", "WAREHOUSE", "OPS"}) {
+            ShipmentServiceGrpc.ShipmentServiceBlockingStub other = ShipmentServiceGrpc.newBlockingStub(channel)
+                    .withInterceptors(TestJwts.bearer(TestJwts.token(UUID.randomUUID().toString(), role)));
+
+            assertCode(() -> other.issueDeliveryOtp(IssueDeliveryOtpRequest.newBuilder().setShipmentId(id).build()),
+                    Status.Code.PERMISSION_DENIED);
+        }
     }
 
     @Test

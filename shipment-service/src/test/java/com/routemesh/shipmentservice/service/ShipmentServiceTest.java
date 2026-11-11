@@ -446,7 +446,17 @@ class ShipmentServiceTest {
     }
 
     private void addProofOfDelivery(UUID id) {
-        jdbc.update("INSERT INTO proof_of_delivery (shipment_id) VALUES (?) ON CONFLICT DO NOTHING", id);
+        if (Boolean.TRUE.equals(jdbc.queryForObject(
+                "SELECT EXISTS (SELECT 1 FROM proof_of_delivery WHERE shipment_id = ?)", Boolean.class, id))) {
+            return;
+        }
+        UUID fileId = UUID.randomUUID();
+        jdbc.update("INSERT INTO pod_files (id, shipment_id, kind, object_key, sha256, size_bytes, content_type, "
+                + "uploaded_by) VALUES (?, ?, 'PHOTO', ?, repeat('a', 64), 10, 'image/jpeg', gen_random_uuid())",
+                fileId, id, "pod/" + id + "/" + fileId + ".jpg");
+        jdbc.update("INSERT INTO proof_of_delivery (shipment_id, courier_id, delivered_latitude, delivered_longitude, "
+                + "distance_meters, recipient_name, photo_file_id) VALUES (?, gen_random_uuid(), 40.9876, 29.0369, "
+                + "5, 'Ada Lovelace', ?)", id, fileId);
     }
 
     private static CreateShipmentCommand withId(CreateShipmentCommand c, UUID id) {

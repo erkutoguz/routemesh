@@ -18,6 +18,7 @@ import com.routemesh.contracts.common.Money;
 import com.routemesh.contracts.payment.CapturePaymentRequest;
 import com.routemesh.contracts.payment.CreatePaymentIntentRequest;
 import com.routemesh.contracts.payment.ExpirePaymentRequest;
+import com.routemesh.contracts.payment.FindPaymentByShipmentRequest;
 import com.routemesh.contracts.payment.GetPaymentRequest;
 import com.routemesh.contracts.payment.PaymentCommandResponse;
 import com.routemesh.contracts.payment.PaymentIntent;
@@ -132,6 +133,28 @@ class PaymentGrpcServiceTest {
 
         PaymentCommandResponse full = stub.refundPayment(refundRequest(created.getId(), 601));
         assertThat(full.getPayment().getStatus()).isEqualTo(PaymentStatus.PAYMENT_STATUS_REFUNDED);
+    }
+
+    @Test
+    void findPaymentByShipment_returnsTheCapturedPaymentOnly() {
+        CreatePaymentIntentRequest request = createRequest(key(), 1001);
+        PaymentIntent created = stub.createPaymentIntent(request).getPayment();
+        FindPaymentByShipmentRequest find = FindPaymentByShipmentRequest.newBuilder()
+                .setShipmentId(request.getShipmentId()).build();
+
+        assertCode(() -> stub.findPaymentByShipment(find), Status.Code.NOT_FOUND);
+        authorize(created);
+        assertCode(() -> stub.findPaymentByShipment(find), Status.Code.NOT_FOUND);
+
+        stub.capturePayment(CapturePaymentRequest.newBuilder().setPaymentId(created.getId())
+                .setIdempotencyKey(key()).build());
+        assertThat(stub.findPaymentByShipment(find).getId()).isEqualTo(created.getId());
+
+        stub.refundPayment(refundRequest(created.getId(), 400));
+        PaymentIntent refunded = stub.findPaymentByShipment(find);
+        assertThat(refunded.getStatus()).isEqualTo(PaymentStatus.PAYMENT_STATUS_PARTIALLY_REFUNDED);
+        assertCode(() -> stub.findPaymentByShipment(FindPaymentByShipmentRequest.newBuilder().setShipmentId("x").build()),
+                Status.Code.INVALID_ARGUMENT);
     }
 
     @Test

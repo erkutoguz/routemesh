@@ -7,6 +7,8 @@ import org.springframework.context.annotation.Configuration;
 
 import com.routemesh.workflowservice.activity.DispatchActivities;
 import com.routemesh.workflowservice.activity.ShipmentActivities;
+import com.routemesh.workflowservice.settlement.SettlementActivities;
+import com.routemesh.workflowservice.settlement.SettlementWorkflowImpl;
 import com.routemesh.workflowservice.workflow.DispatchWorkflowImpl;
 import com.routemesh.workflowservice.workflow.ShipmentWorkflowImpl;
 
@@ -35,11 +37,13 @@ class TemporalConfiguration {
     @Bean
     @ConditionalOnProperty(name = "routemesh.temporal.worker-enabled", havingValue = "true")
     SmartLifecycle shipmentWorker(WorkflowClient client, TemporalProperties properties,
-            ShipmentActivities activities, DispatchActivities dispatchActivities) {
+            ShipmentActivities activities, DispatchActivities dispatchActivities,
+            SettlementActivities settlementActivities) {
         WorkerFactory factory = WorkerFactory.newInstance(client);
         Worker worker = factory.newWorker(properties.taskQueue());
-        worker.registerWorkflowImplementationTypes(ShipmentWorkflowImpl.class, DispatchWorkflowImpl.class);
-        worker.registerActivitiesImplementations(activities, dispatchActivities);
+        worker.registerWorkflowImplementationTypes(ShipmentWorkflowImpl.class, DispatchWorkflowImpl.class,
+                SettlementWorkflowImpl.class);
+        worker.registerActivitiesImplementations(activities, dispatchActivities, settlementActivities);
         return new SmartLifecycle() {
             @Override
             public void start() {

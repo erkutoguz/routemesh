@@ -20,6 +20,7 @@ import com.routemesh.contracts.events.ShipmentCreatedEvent;
 import com.routemesh.contracts.events.ShipmentStatusChangedEvent;
 import com.routemesh.shipmentservice.domain.Actor;
 import com.routemesh.shipmentservice.domain.HistoryEntry;
+import com.routemesh.shipmentservice.domain.Milestones;
 import com.routemesh.shipmentservice.domain.CreateShipmentCommand;
 import com.routemesh.shipmentservice.domain.Shipment;
 import com.routemesh.shipmentservice.domain.ShipmentResult;
@@ -140,6 +141,11 @@ public class ShipmentService {
         return repository.findById(shipmentId)
                 .orElseThrow(() -> new ShipmentException(Reason.NOT_FOUND,
                         "shipment " + shipmentId + " does not exist"));
+    }
+
+    @Transactional(readOnly = true)
+    public Milestones milestones(UUID shipmentId) {
+        return repository.findMilestones(shipmentId);
     }
 
     @Transactional(readOnly = true)

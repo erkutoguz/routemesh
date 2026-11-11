@@ -43,10 +43,10 @@ class LedgerSchemaTest {
     void systemAccountsAreSeeded() {
         Integer count = app.queryForObject(
                 "SELECT count(*) FROM accounts WHERE code IN "
-                        + "('ASSET:PSP_CLEARING', 'LIABILITY:ESCROW', 'REVENUE:PLATFORM_FEE')",
+                        + "('ASSET:PSP_CLEARING', 'LIABILITY:ESCROW', 'REVENUE:PLATFORM_FEE', 'EXPENSE:LOST_COMPENSATION')",
                 Integer.class);
 
-        assertThat(count).isEqualTo(3);
+        assertThat(count).isEqualTo(4);
     }
 
     @Test

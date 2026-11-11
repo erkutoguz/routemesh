@@ -94,6 +94,27 @@ class ShipmentGrpcServiceTest {
     }
 
     @Test
+    void getShipment_reportsTheWarehouseReceiptOnlyOnceItHappened() {
+        Shipment created = stub.createShipment(createRequest(key())).getShipment();
+        UUID id = UUID.fromString(created.getId());
+        shipmentService.transition(new TransitionCommand(id,
+                com.routemesh.shipmentservice.domain.ShipmentStatus.PAID, Actor.SYSTEM, key(), null, null, null));
+
+        Shipment before = stub.getShipment(GetShipmentRequest.newBuilder().setShipmentId(created.getId()).build());
+        assertThat(before.hasWarehouseReceivedAt()).isFalse();
+        assertThat(before.hasDeliveredAt()).isFalse();
+
+        shipmentService.transition(new TransitionCommand(id,
+                com.routemesh.shipmentservice.domain.ShipmentStatus.AT_WAREHOUSE, Actor.WAREHOUSE, key(), null, null,
+                null));
+        Shipment after = stub.getShipment(GetShipmentRequest.newBuilder().setShipmentId(created.getId()).build());
+        assertThat(after.hasWarehouseReceivedAt()).isTrue();
+        assertThat(after.getWarehouseReceivedAt().getSeconds()).isCloseTo(java.time.Instant.now().getEpochSecond(),
+                org.assertj.core.data.Offset.offset(30L));
+        assertThat(after.hasDeliveredAt()).isFalse();
+    }
+
+    @Test
     void issueDeliveryOtp_returnsASixDigitCodeWithExpiry() {
         String id = stub.createShipment(createRequest(key())).getShipment().getId();
         long now = java.time.Instant.now().getEpochSecond();

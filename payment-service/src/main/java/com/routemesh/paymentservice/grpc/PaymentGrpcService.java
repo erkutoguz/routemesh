@@ -7,6 +7,7 @@ import org.springframework.grpc.server.service.GrpcService;
 import com.routemesh.contracts.payment.CapturePaymentRequest;
 import com.routemesh.contracts.payment.CreatePaymentIntentRequest;
 import com.routemesh.contracts.payment.ExpirePaymentRequest;
+import com.routemesh.contracts.payment.FindPaymentByShipmentRequest;
 import com.routemesh.contracts.payment.GetPaymentRequest;
 import com.routemesh.contracts.payment.PaymentCommandResponse;
 import com.routemesh.contracts.payment.PaymentIntent;
@@ -60,6 +61,12 @@ public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBas
     public void getPayment(GetPaymentRequest request, StreamObserver<PaymentIntent> observer) {
         respond(observer, () -> PaymentMapper.toProto(
                 paymentService.get(PaymentMapper.parseUuid(request.getPaymentId(), "payment_id"))));
+    }
+
+    @Override
+    public void findPaymentByShipment(FindPaymentByShipmentRequest request, StreamObserver<PaymentIntent> observer) {
+        respond(observer, () -> PaymentMapper.toProto(paymentService.findCapturedByShipment(
+                PaymentMapper.parseUuid(request.getShipmentId(), "shipment_id"))));
     }
 
     private static <T> void respond(StreamObserver<T> observer, Supplier<T> action) {

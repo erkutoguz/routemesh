@@ -50,6 +50,9 @@ message Shipment {
   google.protobuf.Timestamp created_at = 13;
   google.protobuf.Timestamp updated_at = 14;
   optional int64 weight_grams = 15;
+  // Yalnızca GetShipment doldurur: ilk AT_WAREHOUSE ve DELIVERED geçişlerinin zamanı (SLA hesabı için).
+  optional google.protobuf.Timestamp warehouse_received_at = 16;
+  optional google.protobuf.Timestamp delivered_at = 17;
 }
 
 message CreateShipmentRequest {

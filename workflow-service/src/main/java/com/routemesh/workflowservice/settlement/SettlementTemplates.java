@@ -16,8 +16,13 @@ public final class SettlementTemplates {
     public static final String CLEARING = "ASSET:PSP_CLEARING";
     public static final String PLATFORM_FEE = "REVENUE:PLATFORM_FEE";
 
+    public static final String LOST_COMPENSATION = "EXPENSE:LOST_COMPENSATION";
+
     public static final String DELIVERY_SETTLEMENT = "DELIVERY_SETTLEMENT";
     public static final String SLA_PENALTY_REFUND = "SLA_PENALTY_REFUND";
+    public static final String RETURN_SETTLEMENT = "RETURN_SETTLEMENT";
+    public static final String LOST_SETTLEMENT = "LOST_SETTLEMENT";
+    public static final String CANCEL_REFUND = "CANCEL_REFUND";
 
     static final long MERCHANT_PERCENT = 75;
     static final long COURIER_PERCENT = 18;
@@ -54,6 +59,43 @@ public final class SettlementTemplates {
                 new Line("LIABILITY:MERCHANT_WALLET:" + merchantId, false, split.merchantMinor()),
                 new Line("LIABILITY:COURIER_WALLET:" + courierId, false, split.courierMinor()),
                 new Line(PLATFORM_FEE, false, split.platformMinor())), 0);
+    }
+
+    /**
+     * Teslim edilemeyen gönderinin depoya dönüşü: kurye sahaya çıktığı için %18 korunur, müşteriye {@code floor(%75)}
+     * iade edilir, platform kalanı (%7 + yuvarlama artığı) alır.
+     */
+    public static Plan returnSettlement(UUID courierId, long amountMinor) {
+        requirePositive(amountMinor);
+        long courier = Math.multiplyExact(amountMinor, COURIER_PERCENT) / 100;
+        long refund = Math.multiplyExact(amountMinor, MERCHANT_PERCENT) / 100;
+        return new Plan(RETURN_SETTLEMENT, nonZero(
+                new Line(ESCROW, true, amountMinor),
+                new Line("LIABILITY:COURIER_WALLET:" + courierId, false, courier),
+                new Line(CLEARING, false, refund),
+                new Line(PLATFORM_FEE, false, amountMinor - courier - refund)), refund);
+    }
+
+    /**
+     * Kayıp gönderi: müşteriye tam iade; satıcının mağdur olmaması için {@code floor(%75)} hakedişi platformun tazminat
+     * giderinden satıcı cüzdanına aktarılır.
+     */
+    public static Plan lostSettlement(UUID merchantId, long amountMinor) {
+        requirePositive(amountMinor);
+        long compensation = split(amountMinor).merchantMinor();
+        return new Plan(LOST_SETTLEMENT, nonZero(
+                new Line(ESCROW, true, amountMinor),
+                new Line(LOST_COMPENSATION, true, compensation),
+                new Line(CLEARING, false, amountMinor),
+                new Line("LIABILITY:MERCHANT_WALLET:" + merchantId, false, compensation)), amountMinor);
+    }
+
+    /** Teslimattan önce iptal (hasarlı gönderi dahil): kesinti yok, müşteriye tam iade. */
+    public static Plan cancelRefund(long amountMinor) {
+        requirePositive(amountMinor);
+        return new Plan(CANCEL_REFUND, List.of(
+                new Line(ESCROW, true, amountMinor),
+                new Line(CLEARING, false, amountMinor)), amountMinor);
     }
 
     /** Ledger sıfır tutarlı satırı kabul etmez; çok küçük tutarlarda yuvarlama bir payı sıfırlayabilir. */

@@ -29,7 +29,7 @@ public class FakeSettlementActivities implements SettlementActivities {
     }
 
     @Override
-    public SettlementContext load(UUID shipmentId) {
+    public SettlementContext load(UUID shipmentId, SettlementKind kind) {
         calls.add("load");
         if (loadFailure != null) {
             throw loadFailure;

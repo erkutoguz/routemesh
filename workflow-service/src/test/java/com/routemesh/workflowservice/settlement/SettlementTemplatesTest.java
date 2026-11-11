@@ -84,6 +84,85 @@ class SettlementTemplatesTest {
         }
     }
 
+    // --- iade, kayıp, iptal ---
+
+    @Test
+    void returnSettlement_keepsTheCourierShareChargesThePlatformAndRefundsTheRest() {
+        UUID courier = UUID.randomUUID();
+
+        Plan plan = SettlementTemplates.returnSettlement(courier, 1001);
+
+        assertThat(plan.transactionType()).isEqualTo("RETURN_SETTLEMENT");
+        assertThat(plan.lines()).containsExactly(
+                new Line("LIABILITY:ESCROW", true, 1001),
+                new Line("LIABILITY:COURIER_WALLET:" + courier, false, 180),
+                new Line("ASSET:PSP_CLEARING", false, 750),
+                new Line("REVENUE:PLATFORM_FEE", false, 71));
+        assertThat(plan.refundToCustomerMinor()).isEqualTo(750);
+        assertBalanced(plan);
+    }
+
+    @Test
+    void returnSettlement_isBalancedForEveryAmountAndTheRemainderGoesToThePlatform() {
+        UUID courier = UUID.randomUUID();
+
+        for (long amount = 1; amount <= 5_000; amount++) {
+            Plan plan = SettlementTemplates.returnSettlement(courier, amount);
+
+            assertBalanced(plan);
+            assertThat(plan.refundToCustomerMinor()).isEqualTo(amount * 75 / 100);
+        }
+    }
+
+    @Test
+    void lostSettlement_refundsEverythingAndCompensatesTheMerchantFromTheExpenseAccount() {
+        UUID merchant = UUID.randomUUID();
+
+        Plan plan = SettlementTemplates.lostSettlement(merchant, 1001);
+
+        assertThat(plan.transactionType()).isEqualTo("LOST_SETTLEMENT");
+        assertThat(plan.lines()).containsExactly(
+                new Line("LIABILITY:ESCROW", true, 1001),
+                new Line("EXPENSE:LOST_COMPENSATION", true, 750),
+                new Line("ASSET:PSP_CLEARING", false, 1001),
+                new Line("LIABILITY:MERCHANT_WALLET:" + merchant, false, 750));
+        assertThat(plan.refundToCustomerMinor()).isEqualTo(1001);
+        assertBalanced(plan);
+    }
+
+    @Test
+    void lostSettlement_isBalancedForEveryAmount_andLeavesOutAZeroCompensation() {
+        UUID merchant = UUID.randomUUID();
+
+        for (long amount = 1; amount <= 5_000; amount++) {
+            assertBalanced(SettlementTemplates.lostSettlement(merchant, amount));
+        }
+        assertThat(SettlementTemplates.lostSettlement(merchant, 1).lines()).containsExactly(
+                new Line("LIABILITY:ESCROW", true, 1),
+                new Line("ASSET:PSP_CLEARING", false, 1));
+    }
+
+    @Test
+    void cancelRefund_returnsTheWholeAmountWithoutAnyCut() {
+        Plan plan = SettlementTemplates.cancelRefund(1001);
+
+        assertThat(plan.transactionType()).isEqualTo("CANCEL_REFUND");
+        assertThat(plan.lines()).containsExactly(
+                new Line("LIABILITY:ESCROW", true, 1001),
+                new Line("ASSET:PSP_CLEARING", false, 1001));
+        assertThat(plan.refundToCustomerMinor()).isEqualTo(1001);
+        assertBalanced(plan);
+    }
+
+    @Test
+    void refundTemplates_rejectNonPositiveAmounts() {
+        assertThatThrownBy(() -> SettlementTemplates.returnSettlement(UUID.randomUUID(), 0))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> SettlementTemplates.lostSettlement(UUID.randomUUID(), -1))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> SettlementTemplates.cancelRefund(0)).isInstanceOf(IllegalArgumentException.class);
+    }
+
     // --- SLA cezası ---
 
     @Test

@@ -1,8 +1,9 @@
 package com.routemesh.workflowservice.settlement;
 
 /**
- * Hakedişe esas veriler. Zamanlar epoch milisaniye; 0: henüz olmadı.
+ * Hakedişe esas veriler. Zamanlar epoch milisaniye; yalnızca teslimatta dolu (diğerlerinde 0).
  *
+ * @param courierId          teslimat ve iadede dolu, diğerlerinde boş
  * @param escrowBalanceMinor ledger'daki gönderiye ait escrow bakiyesi (dağıtımdan sonra 0)
  */
 public record SettlementContext(

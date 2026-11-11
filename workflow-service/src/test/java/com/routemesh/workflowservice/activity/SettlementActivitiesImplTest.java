@@ -39,6 +39,7 @@ import com.routemesh.contracts.shipment.ShipmentServiceGrpc;
 import com.routemesh.contracts.shipment.ShipmentStatus;
 import com.routemesh.workflowservice.settlement.SettlementActivities;
 import com.routemesh.workflowservice.settlement.SettlementContext;
+import com.routemesh.workflowservice.settlement.SettlementKind;
 import com.routemesh.workflowservice.settlement.SettlementTemplates;
 
 import io.grpc.Status;
@@ -89,7 +90,7 @@ class SettlementActivitiesImplTest {
     void load_collectsShipmentSlaAndEscrowBalance() {
         when(shipments.getShipment(any(GetShipmentRequest.class))).thenReturn(delivered().build());
 
-        SettlementContext context = activities.load(shipmentId);
+        SettlementContext context = activities.load(shipmentId, SettlementKind.DELIVERY);
 
         assertThat(context).isEqualTo(new SettlementContext(shipmentId.toString(), merchantId.toString(),
                 courierId.toString(), 1001, 1001, 1_800_000_000_000L, 1_800_000_000_000L + 7_200_000L, 240));
@@ -107,7 +108,7 @@ class SettlementActivitiesImplTest {
         when(shipments.getShipment(any(GetShipmentRequest.class))).thenReturn(delivered().build());
         when(ledger.getBalance(any(GetBalanceRequest.class))).thenReturn(balance(0));
 
-        assertThat(activities.load(shipmentId).escrowBalanceMinor()).isZero();
+        assertThat(activities.load(shipmentId, SettlementKind.DELIVERY).escrowBalanceMinor()).isZero();
     }
 
     @Test
@@ -115,7 +116,7 @@ class SettlementActivitiesImplTest {
         when(shipments.getShipment(any(GetShipmentRequest.class)))
                 .thenReturn(delivered().setStatus(ShipmentStatus.SHIPMENT_STATUS_OUT_FOR_DELIVERY).build());
 
-        assertRejected(() -> activities.load(shipmentId), "expected DELIVERED");
+        assertRejected(() -> activities.load(shipmentId, SettlementKind.DELIVERY), "expected SHIPMENT_STATUS_DELIVERED");
         verify(ledger, never()).getBalance(any());
     }
 
@@ -124,17 +125,17 @@ class SettlementActivitiesImplTest {
         when(shipments.getShipment(any(GetShipmentRequest.class))).thenReturn(delivered().build());
         when(ledger.getBalance(any(GetBalanceRequest.class))).thenReturn(balance(500));
 
-        assertRejected(() -> activities.load(shipmentId), "escrow balance 500");
+        assertRejected(() -> activities.load(shipmentId, SettlementKind.DELIVERY), "escrow balance 500");
     }
 
     @Test
     void load_rejectsDeliveredShipmentsWithoutMilestonesOrCourier() {
         when(shipments.getShipment(any(GetShipmentRequest.class)))
                 .thenReturn(delivered().clearWarehouseReceivedAt().build());
-        assertRejected(() -> activities.load(shipmentId), "milestones");
+        assertRejected(() -> activities.load(shipmentId, SettlementKind.DELIVERY), "milestones");
 
         when(shipments.getShipment(any(GetShipmentRequest.class))).thenReturn(delivered().clearCourierId().build());
-        assertRejected(() -> activities.load(shipmentId), "milestones");
+        assertRejected(() -> activities.load(shipmentId, SettlementKind.DELIVERY), "needs the courier");
     }
 
     @Test
@@ -142,7 +143,53 @@ class SettlementActivitiesImplTest {
         when(shipments.getShipment(any(GetShipmentRequest.class)))
                 .thenThrow(new io.grpc.StatusRuntimeException(Status.NOT_FOUND));
 
-        assertRejected(() -> activities.load(shipmentId), "NOT_FOUND");
+        assertRejected(() -> activities.load(shipmentId, SettlementKind.DELIVERY), "NOT_FOUND");
+    }
+
+    @Test
+    void load_forAReturnNeedsTheCourierButNotTheMilestonesOrTheQuote() {
+        when(shipments.getShipment(any(GetShipmentRequest.class))).thenReturn(
+                delivered().setStatus(ShipmentStatus.SHIPMENT_STATUS_CANCELLED).clearWarehouseReceivedAt()
+                        .clearDeliveredAt().build());
+
+        SettlementContext context = activities.load(shipmentId, SettlementKind.RETURN);
+
+        assertThat(context).isEqualTo(new SettlementContext(shipmentId.toString(), merchantId.toString(),
+                courierId.toString(), 1001, 1001, 0, 0, 0));
+        verify(pricing, never()).getQuote(any());
+
+        when(shipments.getShipment(any(GetShipmentRequest.class))).thenReturn(
+                delivered().setStatus(ShipmentStatus.SHIPMENT_STATUS_CANCELLED).clearCourierId().build());
+        assertRejected(() -> activities.load(shipmentId, SettlementKind.RETURN), "needs the courier");
+    }
+
+    @Test
+    void load_forACancellationOrALossDoesNotNeedTheCourier() {
+        when(shipments.getShipment(any(GetShipmentRequest.class))).thenReturn(
+                delivered().setStatus(ShipmentStatus.SHIPMENT_STATUS_CANCELLED).clearCourierId().build());
+        assertThat(activities.load(shipmentId, SettlementKind.CANCEL).courierId()).isEmpty();
+
+        when(shipments.getShipment(any(GetShipmentRequest.class))).thenReturn(
+                delivered().setStatus(ShipmentStatus.SHIPMENT_STATUS_LOST).clearCourierId().build());
+        assertThat(activities.load(shipmentId, SettlementKind.LOST).amountMinor()).isEqualTo(1001);
+    }
+
+    @Test
+    void load_rejectsAShipmentWhoseStateDoesNotMatchTheTemplate() {
+        when(shipments.getShipment(any(GetShipmentRequest.class))).thenReturn(delivered().build());
+
+        assertRejected(() -> activities.load(shipmentId, SettlementKind.CANCEL), "expected SHIPMENT_STATUS_CANCELLED");
+        assertRejected(() -> activities.load(shipmentId, SettlementKind.RETURN), "expected SHIPMENT_STATUS_CANCELLED");
+        assertRejected(() -> activities.load(shipmentId, SettlementKind.LOST), "expected SHIPMENT_STATUS_LOST");
+    }
+
+    @Test
+    void load_forARefundAlsoChecksTheEscrowBalance() {
+        when(shipments.getShipment(any(GetShipmentRequest.class))).thenReturn(
+                delivered().setStatus(ShipmentStatus.SHIPMENT_STATUS_LOST).build());
+        when(ledger.getBalance(any(GetBalanceRequest.class))).thenReturn(balance(300));
+
+        assertRejected(() -> activities.load(shipmentId, SettlementKind.LOST), "escrow balance 300");
     }
 
     @Test

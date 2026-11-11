@@ -23,6 +23,7 @@ import com.routemesh.contracts.shipment.ShipmentServiceGrpc;
 import com.routemesh.contracts.shipment.ShipmentStatus;
 import com.routemesh.workflowservice.settlement.SettlementActivities;
 import com.routemesh.workflowservice.settlement.SettlementContext;
+import com.routemesh.workflowservice.settlement.SettlementKind;
 import com.routemesh.workflowservice.settlement.SettlementTemplates;
 
 import io.temporal.activity.Activity;
@@ -48,14 +49,23 @@ public class SettlementActivitiesImpl implements SettlementActivities {
     }
 
     @Override
-    public SettlementContext load(UUID shipmentId) {
+    public SettlementContext load(UUID shipmentId, SettlementKind kind) {
         Shipment shipment = RpcErrors.call(() -> shipments.getShipment(
                 GetShipmentRequest.newBuilder().setShipmentId(shipmentId.toString()).build()));
-        if (shipment.getStatus() != ShipmentStatus.SHIPMENT_STATUS_DELIVERED) {
-            throw RpcErrors.rejected("shipment is " + shipment.getStatus() + ", expected DELIVERED");
+        ShipmentStatus expected = switch (kind) {
+            case DELIVERY -> ShipmentStatus.SHIPMENT_STATUS_DELIVERED;
+            case RETURN, CANCEL -> ShipmentStatus.SHIPMENT_STATUS_CANCELLED;
+            case LOST -> ShipmentStatus.SHIPMENT_STATUS_LOST;
+        };
+        if (shipment.getStatus() != expected) {
+            throw RpcErrors.rejected("shipment is " + shipment.getStatus() + ", expected " + expected);
         }
-        if (!shipment.hasCourierId() || !shipment.hasWarehouseReceivedAt() || !shipment.hasDeliveredAt()) {
-            throw RpcErrors.rejected("delivered shipment has no courier or delivery milestones");
+        boolean needsCourier = kind == SettlementKind.DELIVERY || kind == SettlementKind.RETURN;
+        if (needsCourier && !shipment.hasCourierId()) {
+            throw RpcErrors.rejected(kind + " settlement needs the courier but the shipment has none");
+        }
+        if (kind == SettlementKind.DELIVERY && (!shipment.hasWarehouseReceivedAt() || !shipment.hasDeliveredAt())) {
+            throw RpcErrors.rejected("delivered shipment has no delivery milestones");
         }
         long amount = shipment.getFinalAmount().getAmountMinor();
         long escrow = RpcErrors.call(() -> ledger.getBalance(GetBalanceRequest.newBuilder()
@@ -64,9 +74,13 @@ public class SettlementActivitiesImpl implements SettlementActivities {
         if (escrow != amount && escrow != 0) {
             throw RpcErrors.rejected("escrow balance " + escrow + " does not match the shipment amount " + amount);
         }
+
+        if (kind != SettlementKind.DELIVERY) {
+            return new SettlementContext(shipmentId.toString(), shipment.getMerchantId(),
+                    shipment.hasCourierId() ? shipment.getCourierId() : "", amount, escrow, 0, 0, 0);
+        }
         int slaMinutes = RpcErrors.call(() -> pricing.getQuote(
                 GetQuoteRequest.newBuilder().setQuoteId(shipment.getQuoteId()).build())).getSlaMinutes();
-
         return new SettlementContext(shipmentId.toString(), shipment.getMerchantId(), shipment.getCourierId(), amount,
                 escrow, millis(shipment.getWarehouseReceivedAt()), millis(shipment.getDeliveredAt()), slaMinutes);
     }

@@ -29,8 +29,7 @@ class SettlementWorkflowTest {
 
     @BeforeEach
     void setUp() {
-        activities = new FakeSettlementActivities(context(1001, 1001, Duration.ofMinutes(200), 240));
-        start(activities);
+        start(new FakeSettlementActivities(context(1001, 1001, Duration.ofMinutes(200), 240)));
     }
 
     @AfterEach
@@ -55,16 +54,29 @@ class SettlementWorkflowTest {
                 RECEIVED, RECEIVED + elapsed.toMillis(), slaMinutes);
     }
 
-    private SettlementResult run() {
-        return env.getWorkflowClient().newWorkflowStub(SettlementWorkflow.class, WorkflowOptions.newBuilder()
-                .setTaskQueue(TASK_QUEUE).setWorkflowId("settlement-" + shipmentId).build()).run(shipmentId);
+    private SettlementContext plain(long amount) {
+        return new SettlementContext(shipmentId.toString(), merchantId.toString(), courierId.toString(), amount, amount,
+                0, 0, 0);
     }
+
+    private SettlementResult run() {
+        return run(SettlementKind.DELIVERY);
+    }
+
+    private SettlementResult run(SettlementKind kind) {
+        return env.getWorkflowClient().newWorkflowStub(SettlementWorkflow.class, WorkflowOptions.newBuilder()
+                .setTaskQueue(TASK_QUEUE).setWorkflowId("settlement-" + shipmentId).build())
+                .run(new SettlementInput(shipmentId, kind));
+    }
+
+    // --- teslimat ---
 
     @Test
     void onTimeDelivery_postsOnlyTheSettlementAndRefundsNothing() {
         SettlementResult result = run();
 
-        assertThat(result).isEqualTo(new SettlementResult(shipmentId.toString(), 750, 180, 71, 0));
+        assertThat(result).isEqualTo(
+                new SettlementResult(shipmentId.toString(), SettlementKind.DELIVERY, 750, 180, 71, 0, 0));
         assertThat(activities.calls).containsExactly("load", "ledger:DELIVERY_SETTLEMENT");
         assertThat(activities.posted.get(0).lines()).containsExactly(
                 new SettlementTemplates.Line("LIABILITY:ESCROW", true, 1001),
@@ -80,9 +92,8 @@ class SettlementWorkflowTest {
 
         SettlementResult result = run();
 
-        assertThat(result.slaPenaltyMinor()).isEqualTo(54);
-        assertThat(result.merchantMinor()).isEqualTo(750);
-        assertThat(result.courierMinor()).isEqualTo(180);
+        assertThat(result).isEqualTo(
+                new SettlementResult(shipmentId.toString(), SettlementKind.DELIVERY, 750, 180, 17, 54, 54));
         assertThat(activities.calls).containsExactly("load", "ledger:DELIVERY_SETTLEMENT",
                 "ledger:SLA_PENALTY_REFUND", "refund:SLA_PENALTY_REFUND");
         assertThat(activities.posted.get(1).lines()).containsExactly(
@@ -96,7 +107,10 @@ class SettlementWorkflowTest {
     void veryLateDelivery_isCappedByThePlatformFee() {
         start(new FakeSettlementActivities(context(1001, 1001, Duration.ofHours(10), 240)));
 
-        assertThat(run().slaPenaltyMinor()).isEqualTo(71);
+        SettlementResult result = run();
+
+        assertThat(result.slaPenaltyMinor()).isEqualTo(71);
+        assertThat(result.platformMinor()).isZero();
         assertThat(activities.refunds.get(0).amountMinor()).isEqualTo(71);
     }
 
@@ -151,5 +165,77 @@ class SettlementWorkflowTest {
 
         assertThat(result.merchantMinor()).isEqualTo(750);
         assertThat(activities.calls).containsExactly("load", "ledger:DELIVERY_SETTLEMENT");
+    }
+
+    // --- iade, kayıp, iptal ---
+
+    @Test
+    void returnedShipment_paysTheCourierAndRefundsSeventyFivePercent() {
+        start(new FakeSettlementActivities(plain(1001)));
+
+        SettlementResult result = run(SettlementKind.RETURN);
+
+        assertThat(result).isEqualTo(new SettlementResult(shipmentId.toString(), SettlementKind.RETURN, 0, 180, 71, 750, 0));
+        assertThat(activities.calls).containsExactly("load", "ledger:RETURN_SETTLEMENT", "refund:RETURN_SETTLEMENT");
+        assertThat(activities.posted.get(0).lines()).containsExactly(
+                new SettlementTemplates.Line("LIABILITY:ESCROW", true, 1001),
+                new SettlementTemplates.Line("LIABILITY:COURIER_WALLET:" + courierId, false, 180),
+                new SettlementTemplates.Line("ASSET:PSP_CLEARING", false, 750),
+                new SettlementTemplates.Line("REVENUE:PLATFORM_FEE", false, 71));
+        assertThat(activities.refunds).containsExactly(
+                new FakeSettlementActivities.Refund("RETURN_SETTLEMENT", 750, "DELIVERY_RETURNED"));
+    }
+
+    @Test
+    void lostShipment_refundsEverythingAndCompensatesTheMerchant() {
+        start(new FakeSettlementActivities(plain(1001)));
+
+        SettlementResult result = run(SettlementKind.LOST);
+
+        assertThat(result).isEqualTo(new SettlementResult(shipmentId.toString(), SettlementKind.LOST, 750, 0, 0, 1001, 0));
+        assertThat(activities.calls).containsExactly("load", "ledger:LOST_SETTLEMENT", "refund:LOST_SETTLEMENT");
+        assertThat(activities.posted.get(0).lines()).containsExactly(
+                new SettlementTemplates.Line("LIABILITY:ESCROW", true, 1001),
+                new SettlementTemplates.Line("EXPENSE:LOST_COMPENSATION", true, 750),
+                new SettlementTemplates.Line("ASSET:PSP_CLEARING", false, 1001),
+                new SettlementTemplates.Line("LIABILITY:MERCHANT_WALLET:" + merchantId, false, 750));
+        assertThat(activities.refunds).containsExactly(
+                new FakeSettlementActivities.Refund("LOST_SETTLEMENT", 1001, "SHIPMENT_LOST"));
+    }
+
+    @Test
+    void cancelledBeforeDelivery_refundsTheWholeAmount() {
+        start(new FakeSettlementActivities(new SettlementContext(shipmentId.toString(), merchantId.toString(), "",
+                1001, 1001, 0, 0, 0)));
+
+        SettlementResult result = run(SettlementKind.CANCEL);
+
+        assertThat(result).isEqualTo(new SettlementResult(shipmentId.toString(), SettlementKind.CANCEL, 0, 0, 0, 1001, 0));
+        assertThat(activities.calls).containsExactly("load", "ledger:CANCEL_REFUND", "refund:CANCEL_REFUND");
+        assertThat(activities.refunds).containsExactly(
+                new FakeSettlementActivities.Refund("CANCEL_REFUND", 1001, "SHIPMENT_CANCELLED"));
+    }
+
+    @Test
+    void refundIsRetriedUntilItSucceeds_withoutRepostingTheLedger() {
+        FakeSettlementActivities flaky = new FakeSettlementActivities(plain(1001));
+        flaky.transientRefundFailures.set(2);
+        start(flaky);
+
+        run(SettlementKind.LOST);
+
+        assertThat(activities.calls.stream().filter("ledger:LOST_SETTLEMENT"::equals).count()).isEqualTo(1);
+        assertThat(activities.calls.stream().filter("refund:LOST_SETTLEMENT"::equals).count()).isEqualTo(3);
+    }
+
+    @Test
+    void refundSettlementsFailAtLoadWhenTheShipmentIsInTheWrongState() {
+        FakeSettlementActivities wrong = new FakeSettlementActivities(plain(1001));
+        wrong.loadFailure = FakeSettlementActivities.rejected("shipment is SHIPMENT_STATUS_PAID, expected CANCELLED");
+        start(wrong);
+
+        assertThatThrownBy(() -> run(SettlementKind.CANCEL)).isInstanceOf(WorkflowException.class);
+
+        assertThat(activities.calls).containsExactly("load");
     }
 }

@@ -25,6 +25,10 @@ public class LedgerRepository {
     public record StoredEntry(String accountCode, Direction direction, long amountMinor) {
     }
 
+    public record WalletEntry(long entryId, UUID transactionId, String transactionType, Direction direction,
+                              long amountMinor, UUID shipmentId, Instant createdAt) {
+    }
+
     private final JdbcClient jdbc;
 
     public LedgerRepository(JdbcClient jdbc) {
@@ -144,6 +148,30 @@ public class LedgerRepository {
                 .param("code", code)
                 .param("type", type.name())
                 .update();
+    }
+
+    /**
+     * Hesabın kayıtları, yeniden eskiye. {@code beforeEntryId} verilirse yalnızca ondan eski kayıtlar gelir
+     * (imleç tabanlı sayfalama; {@code (account_id, id)} indeksi kullanılır).
+     */
+    public List<WalletEntry> findEntriesByAccount(UUID accountId, Long beforeEntryId, int limit) {
+        return jdbc.sql("SELECT e.id, e.transaction_id, t.transaction_type, e.direction, e.amount_minor, "
+                        + "t.shipment_id, e.created_at FROM ledger_entries e "
+                        + "JOIN journal_transactions t ON t.id = e.transaction_id "
+                        + "WHERE e.account_id = :account AND e.id < COALESCE(:before, 9223372036854775807) "
+                        + "ORDER BY e.id DESC LIMIT :limit")
+                .param("account", accountId)
+                .param("before", beforeEntryId, java.sql.Types.BIGINT)
+                .param("limit", limit)
+                .query((rs, rowNum) -> new WalletEntry(
+                        rs.getLong("id"),
+                        rs.getObject("transaction_id", UUID.class),
+                        rs.getString("transaction_type"),
+                        Direction.valueOf(rs.getString("direction")),
+                        rs.getLong("amount_minor"),
+                        rs.getObject("shipment_id", UUID.class),
+                        rs.getObject("created_at", OffsetDateTime.class).toInstant()))
+                .list();
     }
 
     public long netDebit(UUID accountId, UUID shipmentId) {

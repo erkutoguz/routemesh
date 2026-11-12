@@ -53,6 +53,8 @@ class ApiGatewayIntegrationTest {
     private static final HttpServer TRACKING_UPSTREAM = startTrackingUpstream();
     private static final AtomicReference<String> ledgerCall = new AtomicReference<>();
     private static final HttpServer LEDGER_UPSTREAM = startLedgerUpstream();
+    private static final AtomicReference<String> notificationCall = new AtomicReference<>();
+    private static final HttpServer NOTIFICATION_UPSTREAM = startNotificationUpstream();
 
     private final HttpClient client = HttpClient.newHttpClient();
 
@@ -71,6 +73,8 @@ class ApiGatewayIntegrationTest {
                 () -> "http://localhost:" + TRACKING_UPSTREAM.getAddress().getPort());
         registry.add("routemesh.upstreams.ledger",
                 () -> "http://localhost:" + LEDGER_UPSTREAM.getAddress().getPort());
+        registry.add("routemesh.upstreams.notification",
+                () -> "http://localhost:" + NOTIFICATION_UPSTREAM.getAddress().getPort());
     }
 
     @AfterAll
@@ -80,6 +84,7 @@ class ApiGatewayIntegrationTest {
         WORKFLOW_UPSTREAM.stop(0);
         TRACKING_UPSTREAM.stop(0);
         LEDGER_UPSTREAM.stop(0);
+        NOTIFICATION_UPSTREAM.stop(0);
     }
 
     @BeforeEach
@@ -234,6 +239,45 @@ class ApiGatewayIntegrationTest {
     }
 
     @Test
+    void notificationPathsReachTheNotificationServiceWithTheCallersTokenUntouched() throws Exception {
+        for (String role : new String[] {"MERCHANT", "COURIER", "OPS"}) {
+            String token = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of(role), 300);
+
+            notificationCall.set(null);
+            assertThat(get("/api/v1/notifications?unread=true&limit=5&cursor=abc", token).statusCode()).isEqualTo(200);
+            assertThat(notificationCall.get())
+                    .isEqualTo("GET /api/v1/notifications?unread=true&limit=5&cursor=abc Bearer " + token);
+
+            notificationCall.set(null);
+            assertThat(get("/api/v1/notifications/unread-count", token).statusCode()).isEqualTo(200);
+            assertThat(notificationCall.get()).isEqualTo("GET /api/v1/notifications/unread-count Bearer " + token);
+
+            notificationCall.set(null);
+            String id = UUID.randomUUID().toString();
+            assertThat(send("POST", "/api/v1/notifications/" + id + "/read", token).statusCode()).isEqualTo(200);
+            assertThat(notificationCall.get()).isEqualTo("POST /api/v1/notifications/" + id + "/read Bearer " + token);
+        }
+        assertThat(upstreamPath.get()).isNull();
+        assertThat(ledgerCall.get()).isNull();
+    }
+
+    @Test
+    void notificationPathsWithoutAValidTokenNeverReachTheNotificationService() throws Exception {
+        notificationCall.set(null);
+        String wrongAudience = token(SIGNING_KEY, ISSUER, List.of("account"), List.of("MERCHANT"), 300);
+        String expired = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("MERCHANT"), -300);
+        String foreign = token(FOREIGN_KEY, ISSUER, List.of("routemesh-api"), List.of("MERCHANT"), 300);
+        String id = UUID.randomUUID().toString();
+
+        assertThat(get("/api/v1/notifications", null).statusCode()).isEqualTo(401);
+        assertThat(get("/api/v1/notifications/unread-count", wrongAudience).statusCode()).isEqualTo(401);
+        assertThat(send("POST", "/api/v1/notifications/" + id + "/read", expired).statusCode()).isEqualTo(401);
+        assertThat(send("POST", "/api/v1/notifications/" + id + "/read", foreign).statusCode()).isEqualTo(401);
+        assertThat(send("POST", "/api/v1/notifications/" + id + "/read", null).statusCode()).isEqualTo(401);
+        assertThat(notificationCall.get()).isNull();
+    }
+
+    @Test
     void trackingStreamWithoutTokenIsRejectedAtTheGateway() throws Exception {
         trackingCall.set(null);
 
@@ -310,6 +354,27 @@ class ApiGatewayIntegrationTest {
             server.createContext("/", exchange -> {
                 String query = exchange.getRequestURI().getRawQuery();
                 ledgerCall.set(exchange.getRequestURI().getPath() + (query == null ? "" : "?" + query) + " "
+                        + exchange.getRequestHeaders().getFirst("Authorization"));
+                byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            server.start();
+            return server;
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static HttpServer startNotificationUpstream() {
+        try {
+            HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+            server.createContext("/", exchange -> {
+                String query = exchange.getRequestURI().getRawQuery();
+                notificationCall.set(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath()
+                        + (query == null ? "" : "?" + query) + " "
                         + exchange.getRequestHeaders().getFirst("Authorization"));
                 byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json");

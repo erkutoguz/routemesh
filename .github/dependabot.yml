@@ -15,6 +15,7 @@ updates:
       - "/api-gateway"
       - "/workflow-service"
       - "/fleet-service"
+      - "/surge-service"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

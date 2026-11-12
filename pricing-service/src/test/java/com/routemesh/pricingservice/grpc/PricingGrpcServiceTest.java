@@ -18,6 +18,8 @@ import com.routemesh.contracts.common.LatLong;
 import com.routemesh.contracts.pricing.CreateQuoteRequest;
 import com.routemesh.contracts.pricing.CreateQuoteResponse;
 import com.routemesh.contracts.pricing.GetQuoteRequest;
+import com.routemesh.contracts.pricing.LocateZoneRequest;
+import com.routemesh.contracts.pricing.LocateZoneResponse;
 import com.routemesh.contracts.pricing.PricingServiceGrpc;
 import com.routemesh.contracts.pricing.Quote;
 import com.routemesh.contracts.pricing.QuoteStatus;
@@ -144,6 +146,38 @@ class PricingGrpcServiceTest {
                 .setRedemptionKey(key()).setShipmentId(UUID.randomUUID().toString()).build()), Status.Code.NOT_FOUND);
         assertCode(() -> stub.redeemQuote(RedeemQuoteRequest.newBuilder().setQuoteId(UUID.randomUUID().toString())
                 .setRedemptionKey(key()).setShipmentId("x").build()), Status.Code.INVALID_ARGUMENT);
+    }
+
+    @Test
+    void locateZone_usesTheSameRuleAsQuotes() {
+        assertThat(zoneAt(40.9876, 29.0369)).isEqualTo("IST_ASIA_CORE");     // teklifteki teslimat noktası
+        assertThat(zoneAt(41.00, 28.95)).isEqualTo("IST_EUROPE_CORE");
+        assertThat(zoneAt(41.20, 28.70)).isEqualTo("IST_METRO");             // yalnızca geniş bölge kapsıyor
+        assertThat(zoneAt(41.00, 29.00)).isEqualTo("IST_EUROPE_CORE");       // sınır: öncelik ve alan kuralı
+    }
+
+    @Test
+    void locateZone_outsideTheServiceAreaHasNoZone() {
+        LocateZoneResponse outside = stub.locateZone(LocateZoneRequest.newBuilder()
+                .setLocation(LatLong.newBuilder().setLatitude(39.9334).setLongitude(32.8597)).build());
+
+        assertThat(outside.hasZoneCode()).isFalse();
+    }
+
+    @Test
+    void locateZone_rejectsMissingOrInvalidLocationsAndNonWorkflowCallers() {
+        assertCode(() -> stub.locateZone(LocateZoneRequest.getDefaultInstance()), Status.Code.INVALID_ARGUMENT);
+        assertCode(() -> stub.locateZone(LocateZoneRequest.newBuilder()
+                .setLocation(LatLong.newBuilder().setLatitude(91).setLongitude(29)).build()),
+                Status.Code.INVALID_ARGUMENT);
+        PricingServiceGrpc.PricingServiceBlockingStub courier = PricingServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(TestJwts.bearer(TestJwts.token("someone", "COURIER")));
+        assertCode(() -> courier.locateZone(LocateZoneRequest.getDefaultInstance()), Status.Code.PERMISSION_DENIED);
+    }
+
+    private String zoneAt(double latitude, double longitude) {
+        return stub.locateZone(LocateZoneRequest.newBuilder()
+                .setLocation(LatLong.newBuilder().setLatitude(latitude).setLongitude(longitude)).build()).getZoneCode();
     }
 
     private static CreateQuoteRequest createRequest(String key, ServiceLevel level) {

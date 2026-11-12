@@ -12,6 +12,8 @@ service PricingService {
   rpc CreateQuote(CreateQuoteRequest) returns (CreateQuoteResponse);
   rpc GetQuote(GetQuoteRequest) returns (Quote);
   rpc RedeemQuote(RedeemQuoteRequest) returns (RedeemQuoteResponse);
+  // Noktanın hangi fiyat bölgesinde olduğu; teklifin bölge seçimiyle aynı kuralı kullanır (tek doğruluk kaynağı).
+  rpc LocateZone(LocateZoneRequest) returns (LocateZoneResponse);
 }
 
 enum ServiceLevel {
@@ -73,4 +75,13 @@ message RedeemQuoteRequest {
 message RedeemQuoteResponse {
   Quote quote = 1;
   bool replayed = 2;
+}
+
+message LocateZoneRequest {
+  routemesh.common.v1.LatLong location = 1;
+}
+
+message LocateZoneResponse {
+  // Hizmet bölgesi dışındaki noktalarda boş
+  optional string zone_code = 1;
 }

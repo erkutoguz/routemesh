@@ -73,7 +73,7 @@ public class ShipmentService {
         publish(created.id(), ShipmentCreatedEvent.TYPE, ShipmentCreatedEvent.VERSION,
                 new ShipmentCreatedEvent(created.id(), created.merchantId(), created.quoteId(),
                         created.finalAmountMinor(), created.basePriceMinor(), created.currency(),
-                        created.status().name()));
+                        created.status().name(), created.deliveryLatitude(), created.deliveryLongitude()));
         return new ShipmentResult(created, false);
     }
 

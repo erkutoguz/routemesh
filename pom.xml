@@ -17,6 +17,7 @@
         <module>workflow-service</module>
         <module>location-service</module>
         <module>fleet-service</module>
+        <module>surge-service</module>
         <module>ledger-service</module>
         <module>shipment-service</module>
         <module>pricing-service</module>

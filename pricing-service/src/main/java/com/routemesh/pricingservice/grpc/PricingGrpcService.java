@@ -5,6 +5,8 @@ import org.springframework.grpc.server.service.GrpcService;
 import com.routemesh.contracts.pricing.CreateQuoteRequest;
 import com.routemesh.contracts.pricing.CreateQuoteResponse;
 import com.routemesh.contracts.pricing.GetQuoteRequest;
+import com.routemesh.contracts.pricing.LocateZoneRequest;
+import com.routemesh.contracts.pricing.LocateZoneResponse;
 import com.routemesh.contracts.pricing.PricingServiceGrpc;
 import com.routemesh.contracts.pricing.Quote;
 import com.routemesh.contracts.pricing.RedeemQuoteRequest;
@@ -59,6 +61,22 @@ public class PricingGrpcService extends PricingServiceGrpc.PricingServiceImplBas
                     .setQuote(QuoteMapper.toProto(result.quote()))
                     .setReplayed(result.replayed())
                     .build());
+            observer.onCompleted();
+        } catch (PricingException e) {
+            observer.onError(toStatus(e));
+        }
+    }
+
+    @Override
+    public void locateZone(LocateZoneRequest request, StreamObserver<LocateZoneResponse> observer) {
+        try {
+            if (!request.hasLocation()) {
+                throw new PricingException(PricingException.Reason.INVALID_REQUEST, "location is required");
+            }
+            LocateZoneResponse.Builder response = LocateZoneResponse.newBuilder();
+            quoteService.locateZone(request.getLocation().getLatitude(), request.getLocation().getLongitude())
+                    .ifPresent(response::setZoneCode);
+            observer.onNext(response.build());
             observer.onCompleted();
         } catch (PricingException e) {
             observer.onError(toStatus(e));

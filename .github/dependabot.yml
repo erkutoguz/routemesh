@@ -12,6 +12,7 @@ updates:
       - "/payment-service"
       - "/psp-simulator"
       - "/platform-security"
+      - "/platform-observability"
       - "/api-gateway"
       - "/workflow-service"
       - "/fleet-service"

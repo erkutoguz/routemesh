@@ -26,6 +26,12 @@ public class ReconciliationRepository {
                       long intentsChecked, int findingsCount, String error) {
     }
 
+    public record StoredFinding(long id, UUID runId, String type, String severity, UUID intentId, UUID shipmentId,
+                                String pspPaymentId, UUID transactionId, String localStatus, String pspStatus,
+                                Long localCapturedMinor, Long localRefundedMinor, Long pspCapturedMinor,
+                                Long pspRefundedMinor, String detail, Instant createdAt) {
+    }
+
     public record StuckTransaction(UUID id, UUID intentId, UUID shipmentId, String pspPaymentId, String type,
                                    String status, long amountMinor, int attempts, String lastError,
                                    Instant updatedAt) {
@@ -77,6 +83,96 @@ public class ReconciliationRepository {
     public Optional<Run> findRun(UUID id) {
         return jdbc.sql("SELECT " + RUN_COLUMNS + " FROM reconciliation_runs WHERE id = :id").param("id", id)
                 .query(RUN).optional();
+    }
+
+    public Optional<Run> latestFinishedRun() {
+        return jdbc.sql("SELECT " + RUN_COLUMNS + " FROM reconciliation_runs WHERE status <> 'RUNNING' "
+                        + "ORDER BY started_at DESC, id DESC LIMIT 1")
+                .query(RUN).optional();
+    }
+
+    public Optional<Run> activeRun() {
+        return jdbc.sql("SELECT " + RUN_COLUMNS + " FROM reconciliation_runs WHERE status = 'RUNNING'")
+                .query(RUN).optional();
+    }
+
+    public List<Run> listRuns(String status, Instant beforeStartedAt, UUID beforeId, int limit) {
+        StringBuilder sql = new StringBuilder("SELECT " + RUN_COLUMNS + " FROM reconciliation_runs WHERE true");
+        if (status != null) {
+            sql.append(" AND status = :status");
+        }
+        if (beforeStartedAt != null) {
+            sql.append(" AND (started_at, id) < (:at, :beforeId)");
+        }
+        sql.append(" ORDER BY started_at DESC, id DESC LIMIT :limit");
+        JdbcClient.StatementSpec spec = jdbc.sql(sql.toString()).param("limit", limit);
+        if (status != null) {
+            spec = spec.param("status", status);
+        }
+        if (beforeStartedAt != null) {
+            spec = spec.param("at", OffsetDateTime.ofInstant(beforeStartedAt, ZoneOffset.UTC))
+                    .param("beforeId", beforeId);
+        }
+        return spec.query(RUN).list();
+    }
+
+    public List<StoredFinding> listFindings(UUID runId, String type, String severity, Long beforeId, int limit) {
+        StringBuilder sql = new StringBuilder("SELECT id, run_id, type, severity, intent_id, shipment_id, "
+                + "psp_payment_id, transaction_id, local_status, psp_status, local_captured_minor, "
+                + "local_refunded_minor, psp_captured_minor, psp_refunded_minor, detail::text AS detail, created_at "
+                + "FROM reconciliation_findings WHERE true");
+        if (runId != null) {
+            sql.append(" AND run_id = :run");
+        }
+        if (type != null) {
+            sql.append(" AND type = :type");
+        }
+        if (severity != null) {
+            sql.append(" AND severity = :severity");
+        }
+        if (beforeId != null) {
+            sql.append(" AND id < :before");
+        }
+        sql.append(" ORDER BY id DESC LIMIT :limit");
+        JdbcClient.StatementSpec spec = jdbc.sql(sql.toString()).param("limit", limit);
+        if (runId != null) {
+            spec = spec.param("run", runId);
+        }
+        if (type != null) {
+            spec = spec.param("type", type);
+        }
+        if (severity != null) {
+            spec = spec.param("severity", severity);
+        }
+        if (beforeId != null) {
+            spec = spec.param("before", beforeId);
+        }
+        return spec.query((rs, n) -> new StoredFinding(rs.getLong("id"), rs.getObject("run_id", UUID.class),
+                rs.getString("type"), rs.getString("severity"), rs.getObject("intent_id", UUID.class),
+                rs.getObject("shipment_id", UUID.class), rs.getString("psp_payment_id"),
+                rs.getObject("transaction_id", UUID.class), rs.getString("local_status"),
+                rs.getString("psp_status"), (Long) rs.getObject("local_captured_minor"),
+                (Long) rs.getObject("local_refunded_minor"), (Long) rs.getObject("psp_captured_minor"),
+                (Long) rs.getObject("psp_refunded_minor"), rs.getString("detail"),
+                instant(rs.getObject("created_at", OffsetDateTime.class)))).list();
+    }
+
+    public Map<String, Integer> findingTypeCounts(UUID runId) {
+        return counts("type", runId);
+    }
+
+    public Map<String, Integer> findingSeverityCounts(UUID runId) {
+        return counts("severity", runId);
+    }
+
+    private Map<String, Integer> counts(String column, UUID runId) {
+        Map<String, Integer> counts = new java.util.TreeMap<>();
+        jdbc.sql("SELECT " + column + " AS k, count(*) AS n FROM reconciliation_findings WHERE run_id = :run "
+                        + "GROUP BY " + column)
+                .param("run", runId)
+                .query((org.springframework.jdbc.core.RowCallbackHandler) rs ->
+                        counts.put(rs.getString("k"), rs.getInt("n")));
+        return counts;
     }
 
     /** Son başarılı (bulgulu ya da bulgusuz) koşunun pencere sonu. */

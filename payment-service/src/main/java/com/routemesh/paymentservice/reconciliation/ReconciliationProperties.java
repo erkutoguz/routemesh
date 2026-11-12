@@ -17,5 +17,6 @@ public record ReconciliationProperties(
         int pageSize,
         int maxFindingsPerRun,
         int missingFloodThreshold,
-        int maxLookups) {
+        int maxLookups,
+        Duration maxManualWindow) {
 }

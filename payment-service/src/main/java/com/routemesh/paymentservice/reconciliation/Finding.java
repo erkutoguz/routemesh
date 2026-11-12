@@ -25,6 +25,8 @@ public record Finding(
     public static final String REFUNDED_AMOUNT_MISMATCH = "REFUNDED_AMOUNT_MISMATCH";
     public static final String STUCK_TRANSACTION = "STUCK_TRANSACTION";
     public static final String PSP_REPORT_UNAVAILABLE = "PSP_REPORT_UNAVAILABLE";
+    public static final String CLEARING_MISMATCH = "CLEARING_MISMATCH";
+    public static final String LEDGER_UNAVAILABLE = "LEDGER_UNAVAILABLE";
     public static final String TRUNCATED = "TRUNCATED";
 
     public static final String CRITICAL = "CRITICAL";

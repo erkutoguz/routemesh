@@ -12,4 +12,10 @@ public class TestPspConfiguration {
     FakePspClient fakePspClient() {
         return new FakePspClient();
     }
+
+    @Bean
+    @Primary
+    FakeLedgerClearingClient fakeLedgerClearingClient(org.springframework.jdbc.core.JdbcTemplate jdbc) {
+        return new FakeLedgerClearingClient(jdbc);
+    }
 }

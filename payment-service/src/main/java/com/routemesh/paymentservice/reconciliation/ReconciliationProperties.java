@@ -18,5 +18,7 @@ public record ReconciliationProperties(
         int maxFindingsPerRun,
         int missingFloodThreshold,
         int maxLookups,
-        Duration maxManualWindow) {
+        Duration maxManualWindow,
+        boolean ledgerCheckEnabled,
+        int ledgerBatchSize) {
 }

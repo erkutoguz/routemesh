@@ -352,6 +352,7 @@ class ReconciliationServiceTest extends PaymentTestBase {
 
     @Test
     void theNextRunStartsFromTheLastCompletedWindowMinusTheOverlap() {
+        jdbc.update("UPDATE reconciliation_runs SET status = 'FAILED' WHERE status IN ('OK', 'DISCREPANCIES')");
         Instant end = Instant.now().minus(Duration.ofMinutes(5)).truncatedTo(ChronoUnit.MICROS);
         jdbc.update("INSERT INTO reconciliation_runs (trigger_source, status, finished_at, window_from, window_to) "
                 + "VALUES ('SCHEDULED', 'OK', now(), ?, ?)", Timestamp.from(end.minus(Duration.ofHours(1))),

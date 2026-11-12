@@ -60,10 +60,12 @@ public class ReconciliationService {
     private final Clock clock;
     private final TransactionTemplate tx;
     private final JsonMapper jsonMapper;
+    private final ClearingCrossCheck clearing;
 
     public ReconciliationService(ReconciliationRepository repository, PaymentRepository payments, PspClient psp,
                                  ReconciliationProperties properties, Clock clock,
-                                 PlatformTransactionManager transactionManager, JsonMapper jsonMapper) {
+                                 PlatformTransactionManager transactionManager, JsonMapper jsonMapper,
+                                 ClearingCrossCheck clearing) {
         this.repository = repository;
         this.payments = payments;
         this.psp = psp;
@@ -71,6 +73,7 @@ public class ReconciliationService {
         this.clock = clock;
         this.tx = new TransactionTemplate(transactionManager);
         this.jsonMapper = jsonMapper;
+        this.clearing = clearing;
     }
 
     /**
@@ -103,8 +106,10 @@ public class ReconciliationService {
         String error = null;
         boolean failed = false;
         try {
+            List<PaymentIntent> window = loadWindow(run);
             stuckTransactions(findings);
-            reconcile(run, findings, counts);
+            clearing.check(window, clock.instant()).forEach(findings::add);
+            reconcile(run, window, findings, counts);
         } catch (PspUnavailableException e) {
             failed = true;
             error = e.getMessage();
@@ -149,9 +154,28 @@ public class ReconciliationService {
         return repository.failStaleRuns(clock.instant().minus(properties.staleRunAfter()));
     }
 
+    /** Pencerede güncellenen tüm ödeme niyetleri ({@code updated_at, id} anahtar kümeli sayfalarla). */
+    private List<PaymentIntent> loadWindow(Run run) {
+        List<PaymentIntent> window = new ArrayList<>();
+        Instant afterAt = null;
+        UUID afterId = null;
+        List<PaymentIntent> batch;
+        do {
+            batch = payments.findIntentsUpdatedBetween(run.windowFrom(), run.windowTo(), afterAt, afterId,
+                    properties.pageSize());
+            window.addAll(batch);
+            if (!batch.isEmpty()) {
+                PaymentIntent last = batch.getLast();
+                afterAt = last.updatedAt();
+                afterId = last.id();
+            }
+        } while (batch.size() == properties.pageSize());
+        return window;
+    }
+
     // --- PSP karşılaştırması ---
 
-    private void reconcile(Run run, Findings findings, Counts counts) {
+    private void reconcile(Run run, List<PaymentIntent> window, Findings findings, Counts counts) {
         Instant now = clock.instant();
         Map<String, PspPayment> pspPayments = new LinkedHashMap<>();
         String cursor = null;
@@ -163,23 +187,7 @@ public class ReconciliationService {
         counts.pspSeen = pspPayments.size();
 
         Map<String, PaymentIntent> byPspId = new LinkedHashMap<>();
-        List<PaymentIntent> window = new ArrayList<>();
-        Instant afterAt = null;
-        UUID afterId = null;
-        List<PaymentIntent> batch;
-        do {
-            batch = payments.findIntentsUpdatedBetween(run.windowFrom(), run.windowTo(), afterAt, afterId,
-                    properties.pageSize());
-            for (PaymentIntent intent : batch) {
-                window.add(intent);
-                byPspId.put(intent.pspPaymentId(), intent);
-            }
-            if (!batch.isEmpty()) {
-                PaymentIntent last = batch.getLast();
-                afterAt = last.updatedAt();
-                afterId = last.id();
-            }
-        } while (batch.size() == properties.pageSize());
+        window.forEach(intent -> byPspId.put(intent.pspPaymentId(), intent));
 
         Set<String> unmatched = new LinkedHashSet<>(pspPayments.keySet());
         unmatched.removeAll(byPspId.keySet());

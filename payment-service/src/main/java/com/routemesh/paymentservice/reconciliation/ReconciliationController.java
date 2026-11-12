@@ -44,7 +44,8 @@ class ReconciliationController {
     static final Set<String> RUN_STATUSES = Set.of("RUNNING", "OK", "DISCREPANCIES", "FAILED");
     static final Set<String> FINDING_TYPES = Set.of(Finding.MISSING_AT_PSP, Finding.UNKNOWN_AT_PLATFORM,
             Finding.STATUS_MISMATCH, Finding.CAPTURED_AMOUNT_MISMATCH, Finding.REFUNDED_AMOUNT_MISMATCH,
-            Finding.STUCK_TRANSACTION, Finding.PSP_REPORT_UNAVAILABLE, Finding.TRUNCATED);
+            Finding.STUCK_TRANSACTION, Finding.PSP_REPORT_UNAVAILABLE, Finding.CLEARING_MISMATCH,
+            Finding.LEDGER_UNAVAILABLE, Finding.TRUNCATED);
     static final Set<String> SEVERITIES = Set.of(Finding.CRITICAL, Finding.WARNING);
 
     record StartRequest(Instant windowFrom, Instant windowTo) {

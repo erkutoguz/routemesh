@@ -1,5 +1,6 @@
 package com.routemesh.pspsimulator;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -28,12 +29,15 @@ public class SimulatorController {
     public record CompleteRequest(String outcome, Integer delaySeconds, Integer duplicateCount) {
     }
 
-    private final Map<String, SimPayment> payments = new ConcurrentHashMap<>();
+    private final SimPaymentStore payments;
+    private final Clock clock;
     private final Map<String, Map<String, Object>> idempotentResponses = new ConcurrentHashMap<>();
     private final WebhookSender webhookSender;
 
-    public SimulatorController(WebhookSender webhookSender) {
+    public SimulatorController(WebhookSender webhookSender, SimPaymentStore payments, Clock clock) {
         this.webhookSender = webhookSender;
+        this.payments = payments;
+        this.clock = clock;
     }
 
     @PostMapping("/v1/payments")
@@ -51,8 +55,8 @@ public class SimulatorController {
                     "amount_minor must be positive, currency TRY and callback_url required");
         }
         SimPayment payment = new SimPayment("psp_" + UUID.randomUUID(), request.amountMinor(), request.currency(),
-                request.callbackUrl(), request.reference());
-        payments.put(payment.id(), payment);
+                request.callbackUrl(), request.reference(), clock);
+        payments.put(payment);
         Map<String, Object> view = view(payment);
         idempotentResponses.put("create:" + key, view);
         return ResponseEntity.status(HttpStatus.CREATED).body(view);
@@ -102,7 +106,7 @@ public class SimulatorController {
             if (payment.status() != SimPayment.Status.AUTHORIZED) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "payment is " + payment.status());
             }
-            payment.status(SimPayment.Status.CAPTURED);
+            payment.capture();
             webhookSender.send(payment.callbackUrl(), "payment.captured", baseData(payment), Duration.ZERO, 1);
             Map<String, Object> view = view(payment);
             idempotentResponses.put("capture:" + id + ":" + key, view);
@@ -195,7 +199,10 @@ public class SimulatorController {
         view.put("amount_minor", payment.amountMinor());
         view.put("currency", payment.currency());
         view.put("reference", payment.reference());
+        view.put("captured_minor", payment.capturedMinor());
         view.put("refunded_minor", payment.refundedMinor());
+        view.put("created_at", payment.createdAt());
+        view.put("updated_at", payment.updatedAt());
         view.put("checkout_url", "http://localhost:8085/checkout/" + payment.id());
         return view;
     }

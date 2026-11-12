@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -20,7 +21,7 @@ import com.sun.net.httpserver.HttpServer;
 
 class RestPspClientTest {
 
-    private record Received(String method, String path, String idempotencyKey, String body) {
+    private record Received(String method, String path, String query, String idempotencyKey, String body) {
     }
 
     private final List<Received> received = new CopyOnWriteArrayList<>();
@@ -35,6 +36,7 @@ class RestPspClientTest {
         server.createContext("/", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             received.add(new Received(exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
+                    exchange.getRequestURI().getRawQuery(),
                     exchange.getRequestHeaders().getFirst("Idempotency-Key"), body));
             byte[] bytes = responseBody.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
@@ -119,6 +121,81 @@ class RestPspClientTest {
         RestPspClient unreachable = clientFor("http://127.0.0.1:1");
 
         assertThatThrownBy(() -> unreachable.capture("psp_1", "k")).isInstanceOf(PspUnavailableException.class);
+    }
+
+    private static final String PAYMENT_JSON = "{\"id\":\"psp_1\",\"reference\":\"r1\",\"status\":\"CAPTURED\","
+            + "\"currency\":\"TRY\",\"amount_minor\":1000,\"captured_minor\":1000,\"refunded_minor\":250,"
+            + "\"created_at\":\"2030-01-01T00:00:00Z\",\"updated_at\":\"2030-01-01T00:05:00.123456Z\"}";
+
+    @Test
+    void listPayments_sendsTheWindowAndParsesTheReportPage() {
+        responseBody = "{\"items\":[" + PAYMENT_JSON + "],\"next_cursor\":\"abc\"}";
+
+        PspClient.PspReportPage page = client.listPayments(Instant.parse("2030-01-01T00:00:00Z"),
+                Instant.parse("2030-01-02T00:00:00Z"), 50, "cur");
+
+        Received call = received.getFirst();
+        assertThat(call.method()).isEqualTo("GET");
+        assertThat(call.path()).isEqualTo("/v1/reports/payments");
+        assertThat(call.query()).contains("updatedFrom=2030-01-01T00:00:00Z").contains("updatedTo=2030-01-02T00:00:00Z")
+                .contains("limit=50").contains("cursor=cur");
+        assertThat(page.nextCursor()).isEqualTo("abc");
+        assertThat(page.items()).singleElement().satisfies(payment -> {
+            assertThat(payment.id()).isEqualTo("psp_1");
+            assertThat(payment.status()).isEqualTo("CAPTURED");
+            assertThat(payment.capturedMinor()).isEqualTo(1000);
+            assertThat(payment.refundedMinor()).isEqualTo(250);
+            assertThat(payment.updatedAt()).isEqualTo(Instant.parse("2030-01-01T00:05:00.123456Z"));
+        });
+    }
+
+    @Test
+    void listPayments_omitsMissingFiltersAndMapsALastPageToANullCursor() {
+        responseBody = "{\"items\":[],\"next_cursor\":null}";
+
+        PspClient.PspReportPage page = client.listPayments(null, null, 10, null);
+
+        assertThat(received.getFirst().query()).isEqualTo("limit=10");
+        assertThat(page.items()).isEmpty();
+        assertThat(page.nextCursor()).isNull();
+    }
+
+    @Test
+    void listPayments_failuresAreTransient() {
+        status = 503;
+        responseBody = "{}";
+
+        assertThatThrownBy(() -> client.listPayments(null, null, 10, null))
+                .isInstanceOf(PspUnavailableException.class);
+    }
+
+    @Test
+    void findPayment_readsOnePayment() {
+        responseBody = PAYMENT_JSON;
+
+        assertThat(client.findPayment("psp_1")).hasValueSatisfying(payment -> {
+            assertThat(payment.reference()).isEqualTo("r1");
+            assertThat(payment.amountMinor()).isEqualTo(1000);
+        });
+        assertThat(received.getFirst().path()).isEqualTo("/v1/payments/psp_1");
+    }
+
+    @Test
+    void findPayment_isEmptyWhenThePspDoesNotKnowThePayment() {
+        status = 404;
+        responseBody = "{\"error\":\"not found\"}";
+
+        assertThat(client.findPayment("psp_gone")).isEmpty();
+    }
+
+    @Test
+    void findPayment_otherFailuresAreNotHiddenAsMissing() {
+        status = 500;
+        responseBody = "{}";
+        assertThatThrownBy(() -> client.findPayment("psp_1")).isInstanceOf(PspUnavailableException.class);
+
+        status = 400;
+        assertThatThrownBy(() -> client.findPayment("psp_1")).isInstanceOf(PspRejectedException.class);
     }
 
     private static RestPspClient clientFor(String baseUrl) {

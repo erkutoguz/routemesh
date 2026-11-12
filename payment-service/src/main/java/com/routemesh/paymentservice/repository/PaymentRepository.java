@@ -248,6 +248,36 @@ public class PaymentRepository {
                 .update();
     }
 
+    /** Mutabakat penceresi: {@code updated_at} artan sırada, {@code from} dahil ve {@code to} hariç, anahtar kümeli. */
+    public List<PaymentIntent> findIntentsUpdatedBetween(Instant from, Instant to, Instant afterUpdatedAt,
+                                                         UUID afterId, int limit) {
+        StringBuilder sql = new StringBuilder("SELECT " + INTENT_COLUMNS + " FROM payment_intents "
+                + "WHERE updated_at >= :from AND updated_at < :to");
+        if (afterUpdatedAt != null) {
+            sql.append(" AND (updated_at, id) > (:afterAt, :afterId)");
+        }
+        sql.append(" ORDER BY updated_at, id LIMIT :limit");
+        JdbcClient.StatementSpec spec = jdbc.sql(sql.toString())
+                .param("from", OffsetDateTime.ofInstant(from, ZoneOffset.UTC))
+                .param("to", OffsetDateTime.ofInstant(to, ZoneOffset.UTC))
+                .param("limit", limit);
+        if (afterUpdatedAt != null) {
+            spec = spec.param("afterAt", OffsetDateTime.ofInstant(afterUpdatedAt, ZoneOffset.UTC))
+                    .param("afterId", afterId);
+        }
+        return spec.query((rs, n) -> mapStoredIntent(rs).intent()).list();
+    }
+
+    public List<PaymentIntent> findIntentsByPspIds(java.util.Collection<String> pspPaymentIds) {
+        if (pspPaymentIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("SELECT " + INTENT_COLUMNS + " FROM payment_intents WHERE psp_payment_id IN (:ids)")
+                .param("ids", pspPaymentIds)
+                .query((rs, n) -> mapStoredIntent(rs).intent())
+                .list();
+    }
+
     private static StoredIntent mapStoredIntent(ResultSet rs) throws SQLException {
         PaymentIntent intent = new PaymentIntent(
                 rs.getObject("id", UUID.class),

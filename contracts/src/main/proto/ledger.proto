@@ -11,6 +11,8 @@ option java_package = "com.routemesh.contracts.ledger";
 service LedgerService {
   rpc PostTransaction(PostTransactionRequest) returns (PostTransactionResponse);
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+  // Gönderi başına ASSET:PSP_CLEARING net borcu (borç - alacak); mutabakat çapraz kontrolü için. En çok 500 gönderi.
+  rpc GetClearingBalances(GetClearingBalancesRequest) returns (GetClearingBalancesResponse);
 }
 
 enum EntryDirection {
@@ -47,4 +49,18 @@ message GetBalanceRequest {
 message GetBalanceResponse {
   string account_code = 1;
   routemesh.common.v1.Money balance = 2;
+}
+
+message GetClearingBalancesRequest {
+  repeated string shipment_ids = 1;
+}
+
+message ShipmentClearingBalance {
+  string shipment_id = 1;
+  // ASSET:PSP_CLEARING üzerindeki net borç (borç - alacak); hiç kaydı olmayan gönderi için 0
+  int64 net_debit_minor = 2;
+}
+
+message GetClearingBalancesResponse {
+  repeated ShipmentClearingBalance balances = 1;
 }

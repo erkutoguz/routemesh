@@ -17,6 +17,8 @@ import org.springframework.grpc.client.GrpcChannelFactory;
 import com.routemesh.contracts.common.Money;
 import com.routemesh.contracts.ledger.EntryDirection;
 import com.routemesh.contracts.ledger.GetBalanceRequest;
+import com.routemesh.contracts.ledger.GetClearingBalancesRequest;
+import com.routemesh.contracts.ledger.GetClearingBalancesResponse;
 import com.routemesh.contracts.ledger.LedgerEntry;
 import com.routemesh.contracts.ledger.LedgerServiceGrpc;
 import com.routemesh.contracts.ledger.PostTransactionRequest;
@@ -192,5 +194,90 @@ class LedgerGrpcServiceTest {
         assertThatThrownBy(call::run)
                 .isInstanceOfSatisfying(StatusRuntimeException.class,
                         e -> assertThat(e.getStatus().getCode()).isEqualTo(code));
+    }
+
+    // --- GetClearingBalances ---
+
+    @Test
+    void getClearingBalances_returnsTheNetClearingDebitPerShipmentInRequestOrder() {
+        UUID funded = UUID.randomUUID();
+        UUID refunded = UUID.randomUUID();
+        UUID untouched = UUID.randomUUID();
+        stub.postTransaction(capture(UUID.randomUUID().toString(), funded, 1001));
+        stub.postTransaction(capture(UUID.randomUUID().toString(), refunded, 500));
+        stub.postTransaction(PostTransactionRequest.newBuilder()
+                .setIdempotencyKey(UUID.randomUUID().toString()).setTransactionType("SLA_REFUND")
+                .setShipmentId(refunded.toString())
+                .addEntries(entry(ESCROW, EntryDirection.ENTRY_DIRECTION_DEBIT, 200))
+                .addEntries(entry(PSP, EntryDirection.ENTRY_DIRECTION_CREDIT, 200)).build());
+
+        GetClearingBalancesResponse response = stub.getClearingBalances(GetClearingBalancesRequest.newBuilder()
+                .addShipmentIds(refunded.toString()).addShipmentIds(untouched.toString())
+                .addShipmentIds(funded.toString()).build());
+
+        assertThat(response.getBalancesList()).extracting(b -> b.getShipmentId() + "=" + b.getNetDebitMinor())
+                .containsExactly(refunded + "=300", untouched + "=0", funded + "=1001");
+    }
+
+    @Test
+    void getClearingBalances_ignoresEveryAccountExceptThePspClearing() {
+        UUID shipment = UUID.randomUUID();
+        stub.postTransaction(capture(UUID.randomUUID().toString(), shipment, 1000));
+        String wallet = "LIABILITY:MERCHANT_WALLET:" + UUID.randomUUID();
+        stub.postTransaction(PostTransactionRequest.newBuilder()
+                .setIdempotencyKey(UUID.randomUUID().toString()).setTransactionType("DELIVERY_SETTLEMENT")
+                .setShipmentId(shipment.toString())
+                .addEntries(entry(ESCROW, EntryDirection.ENTRY_DIRECTION_DEBIT, 1000))
+                .addEntries(entry(wallet, EntryDirection.ENTRY_DIRECTION_CREDIT, 750))
+                .addEntries(entry("REVENUE:PLATFORM_FEE", EntryDirection.ENTRY_DIRECTION_CREDIT, 250)).build());
+
+        assertThat(stub.getClearingBalances(GetClearingBalancesRequest.newBuilder()
+                .addShipmentIds(shipment.toString()).build()).getBalances(0).getNetDebitMinor()).isEqualTo(1000);
+    }
+
+    @Test
+    void getClearingBalances_collapsesDuplicatesAndAcceptsAnEmptyList() {
+        UUID shipment = UUID.randomUUID();
+        stub.postTransaction(capture(UUID.randomUUID().toString(), shipment, 700));
+
+        GetClearingBalancesResponse response = stub.getClearingBalances(GetClearingBalancesRequest.newBuilder()
+                .addShipmentIds(shipment.toString()).addShipmentIds(shipment.toString()).build());
+
+        assertThat(response.getBalancesCount()).isEqualTo(1);
+        assertThat(stub.getClearingBalances(GetClearingBalancesRequest.getDefaultInstance()).getBalancesCount())
+                .isZero();
+    }
+
+    @Test
+    void getClearingBalances_acceptsExactly500ShipmentsButNotMore() {
+        GetClearingBalancesRequest.Builder max = GetClearingBalancesRequest.newBuilder();
+        for (int i = 0; i < 500; i++) {
+            max.addShipmentIds(UUID.randomUUID().toString());
+        }
+        assertThat(stub.getClearingBalances(max.build()).getBalancesCount()).isEqualTo(500);
+
+        max.addShipmentIds(UUID.randomUUID().toString());
+        assertCode(() -> stub.getClearingBalances(max.build()), Status.Code.INVALID_ARGUMENT);
+    }
+
+    @Test
+    void getClearingBalances_rejectsMalformedShipmentIds() {
+        for (String bad : new String[] {"x", "", UUID.randomUUID().toString().toUpperCase()}) {
+            assertCode(() -> stub.getClearingBalances(GetClearingBalancesRequest.newBuilder()
+                    .addShipmentIds(bad).build()), Status.Code.INVALID_ARGUMENT);
+        }
+    }
+
+    @Test
+    void getClearingBalances_isForWorkflowServiceAccountsOnly() {
+        GetClearingBalancesRequest request = GetClearingBalancesRequest.newBuilder()
+                .addShipmentIds(UUID.randomUUID().toString()).build();
+        LedgerServiceGrpc.LedgerServiceBlockingStub anonymous = LedgerServiceGrpc.newBlockingStub(channel);
+        assertCode(() -> anonymous.getClearingBalances(request), Status.Code.UNAUTHENTICATED);
+        for (String role : new String[] {"MERCHANT", "COURIER", "WAREHOUSE", "OPS"}) {
+            LedgerServiceGrpc.LedgerServiceBlockingStub other = LedgerServiceGrpc.newBlockingStub(channel)
+                    .withInterceptors(TestJwts.bearer(TestJwts.token("someone", role)));
+            assertCode(() -> other.getClearingBalances(request), Status.Code.PERMISSION_DENIED);
+        }
     }
 }

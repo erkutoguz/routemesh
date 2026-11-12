@@ -4,11 +4,14 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -38,6 +41,8 @@ import tools.jackson.databind.json.JsonMapper;
 public class LedgerService {
 
     private static final String CURRENCY = "TRY";
+    public static final int MAX_CLEARING_SHIPMENTS = 500;
+
     private static final String AGGREGATE_TYPE = "ledger";
     private static final int MAX_ENTRIES = 20;
     private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 255;
@@ -112,6 +117,23 @@ public class LedgerService {
                 aggregateId, event);
         repository.insertOutbox(eventId, AGGREGATE_TYPE, aggregateId, LedgerTransactionPostedEvent.TYPE,
                 jsonMapper.writeValueAsString(envelope));
+    }
+
+    /**
+     * Gönderi başına {@code ASSET:PSP_CLEARING} net borcu. İstenen her tekil gönderi için bir değer döner
+     * (kaydı yoksa 0). En çok {@value #MAX_CLEARING_SHIPMENTS} gönderi.
+     */
+    @Transactional(readOnly = true)
+    public Map<UUID, Long> clearingBalances(Collection<UUID> shipmentIds) {
+        Set<UUID> unique = new LinkedHashSet<>(shipmentIds);
+        if (unique.size() > MAX_CLEARING_SHIPMENTS) {
+            throw new LedgerException(Reason.INVALID_REQUEST,
+                    "at most " + MAX_CLEARING_SHIPMENTS + " shipment ids per call");
+        }
+        Map<UUID, Long> found = repository.clearingNetDebitByShipment(unique);
+        Map<UUID, Long> result = new LinkedHashMap<>();
+        unique.forEach(id -> result.put(id, found.getOrDefault(id, 0L)));
+        return result;
     }
 
     @Transactional(readOnly = true)

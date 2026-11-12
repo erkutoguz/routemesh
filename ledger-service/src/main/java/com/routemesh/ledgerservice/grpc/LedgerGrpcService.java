@@ -2,6 +2,7 @@ package com.routemesh.ledgerservice.grpc;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.grpc.server.service.GrpcService;
@@ -11,10 +12,13 @@ import com.routemesh.contracts.common.Money;
 import com.routemesh.contracts.ledger.EntryDirection;
 import com.routemesh.contracts.ledger.GetBalanceRequest;
 import com.routemesh.contracts.ledger.GetBalanceResponse;
+import com.routemesh.contracts.ledger.GetClearingBalancesRequest;
+import com.routemesh.contracts.ledger.GetClearingBalancesResponse;
 import com.routemesh.contracts.ledger.LedgerEntry;
 import com.routemesh.contracts.ledger.LedgerServiceGrpc;
 import com.routemesh.contracts.ledger.PostTransactionRequest;
 import com.routemesh.contracts.ledger.PostTransactionResponse;
+import com.routemesh.contracts.ledger.ShipmentClearingBalance;
 import com.routemesh.ledgerservice.domain.Direction;
 import com.routemesh.ledgerservice.domain.EntryCommand;
 import com.routemesh.ledgerservice.domain.PostTransactionCommand;
@@ -62,6 +66,23 @@ public class LedgerGrpcService extends LedgerServiceGrpc.LedgerServiceImplBase {
                     .setAccountCode(request.getAccountCode())
                     .setBalance(Money.newBuilder().setAmountMinor(balance).setCurrency(CURRENCY))
                     .build());
+            responseObserver.onCompleted();
+        } catch (LedgerException e) {
+            responseObserver.onError(toStatus(e));
+        }
+    }
+
+    @Override
+    public void getClearingBalances(GetClearingBalancesRequest request,
+                                    StreamObserver<GetClearingBalancesResponse> responseObserver) {
+        try {
+            List<UUID> ids = request.getShipmentIdsList().stream().map(id -> parseUuid(id, "shipment_ids")).toList();
+            GetClearingBalancesResponse.Builder response = GetClearingBalancesResponse.newBuilder();
+            for (Map.Entry<UUID, Long> balance : ledgerService.clearingBalances(ids).entrySet()) {
+                response.addBalances(ShipmentClearingBalance.newBuilder()
+                        .setShipmentId(balance.getKey().toString()).setNetDebitMinor(balance.getValue()));
+            }
+            responseObserver.onNext(response.build());
             responseObserver.onCompleted();
         } catch (LedgerException e) {
             responseObserver.onError(toStatus(e));

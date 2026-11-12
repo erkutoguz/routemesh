@@ -268,6 +268,17 @@ public class PaymentRepository {
         return spec.query((rs, n) -> mapStoredIntent(rs).intent()).list();
     }
 
+    /** Gönderilerin tüm ödeme niyetleri (başarısız ve süresi dolmuş denemeler dahil). */
+    public List<PaymentIntent> findIntentsByShipmentIds(java.util.Collection<UUID> shipmentIds) {
+        if (shipmentIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("SELECT " + INTENT_COLUMNS + " FROM payment_intents WHERE shipment_id IN (:ids)")
+                .param("ids", shipmentIds)
+                .query((rs, n) -> mapStoredIntent(rs).intent())
+                .list();
+    }
+
     public List<PaymentIntent> findIntentsByPspIds(java.util.Collection<String> pspPaymentIds) {
         if (pspPaymentIds.isEmpty()) {
             return List.of();

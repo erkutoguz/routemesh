@@ -3,7 +3,10 @@ package com.routemesh.ledgerservice.repository;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -182,6 +185,23 @@ public class LedgerRepository {
                         rs.getObject("shipment_id", UUID.class),
                         rs.getObject("created_at", OffsetDateTime.class).toInstant()))
                 .list();
+    }
+
+    /** Gönderi başına {@code ASSET:PSP_CLEARING} net borcu (borç - alacak); kaydı olmayan gönderi sonuçta yer almaz. */
+    public Map<UUID, Long> clearingNetDebitByShipment(Collection<UUID> shipmentIds) {
+        if (shipmentIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, Long> result = new HashMap<>();
+        jdbc.sql("SELECT t.shipment_id, SUM(CASE e.direction WHEN 'DEBIT' THEN e.amount_minor "
+                        + "ELSE -e.amount_minor END) AS net FROM ledger_entries e "
+                        + "JOIN journal_transactions t ON t.id = e.transaction_id "
+                        + "JOIN accounts a ON a.id = e.account_id "
+                        + "WHERE a.code = 'ASSET:PSP_CLEARING' AND t.shipment_id IN (:ids) GROUP BY t.shipment_id")
+                .param("ids", shipmentIds)
+                .query((org.springframework.jdbc.core.RowCallbackHandler) rs ->
+                        result.put(rs.getObject("shipment_id", UUID.class), rs.getLong("net")));
+        return result;
     }
 
     public long netDebit(UUID accountId, UUID shipmentId) {

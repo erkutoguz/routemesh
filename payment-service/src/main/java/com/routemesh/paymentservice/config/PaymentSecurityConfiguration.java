@@ -26,7 +26,7 @@ class PaymentSecurityConfiguration {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/v1/webhooks/psp").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/actuator/health/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/actuator/health/**", "/actuator/prometheus").permitAll()
                         .requestMatchers("/api/v1/ops/payments/**").hasRole("OPS")
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(converter)))

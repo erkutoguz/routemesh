@@ -21,6 +21,8 @@ import com.routemesh.surgeservice.topology.SurgeTopology;
 import com.routemesh.surgeservice.zone.PricingZoneLocator;
 import com.routemesh.surgeservice.zone.ZoneLocator;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.binder.kafka.KafkaStreamsMetrics;
 import tools.jackson.databind.json.JsonMapper;
 
 @Configuration(proxyBeanMethods = false)
@@ -39,7 +41,8 @@ class SurgeStreamsConfiguration {
     @Bean
     @ConditionalOnProperty(name = "routemesh.surge.streams-enabled", havingValue = "true")
     SmartLifecycle surgeStreams(SurgeProperties properties, ZoneLocator zones, SurgePublisher publisher,
-            JsonMapper mapper, @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers) {
+            JsonMapper mapper, MeterRegistry meters,
+            @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers) {
         Properties config = new Properties();
         config.put(StreamsConfig.APPLICATION_ID_CONFIG, "surge-service");
         config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
@@ -52,15 +55,18 @@ class SurgeStreamsConfiguration {
 
         KafkaStreams streams = new KafkaStreams(SurgeTopology.build(properties, zones, publisher, mapper), config);
         streams.setUncaughtExceptionHandler(error -> StreamThreadExceptionResponse.REPLACE_THREAD);
+        KafkaStreamsMetrics streamsMetrics = new KafkaStreamsMetrics(streams);
         return new SmartLifecycle() {
             @Override
             public void start() {
+                streamsMetrics.bindTo(meters);
                 streams.start();
             }
 
             @Override
             public void stop() {
                 streams.close(java.time.Duration.ofSeconds(10));
+                streamsMetrics.close();
             }
 
             @Override

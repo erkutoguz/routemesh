@@ -29,6 +29,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -36,6 +37,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureMetrics
 class ApiGatewayIntegrationTest {
 
     private static final String ISSUER = "http://issuer.test/realms/routemesh";
@@ -429,6 +431,16 @@ class ApiGatewayIntegrationTest {
         }
         assertThat(send("POST", "/api/v1/ops/payments/reconciliation-runs", merchant).statusCode()).isEqualTo(403);
         assertThat(paymentCall.get()).isNull();
+    }
+
+    @Test
+    void prometheusIsServedByTheGatewayItselfWithoutATokenAndIsNeverForwarded() throws Exception {
+        HttpResponse<String> response = get("/actuator/prometheus", null);
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.body()).contains("jvm_memory_used_bytes").contains("application=\"api-gateway\"");
+        assertThat(upstreamPath.get()).isNull();
+        assertThat(get("/actuator/env", null).statusCode()).isEqualTo(401);
     }
 
     @Test

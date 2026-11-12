@@ -16,6 +16,7 @@ updates:
       - "/workflow-service"
       - "/fleet-service"
       - "/surge-service"
+      - "/notification-service"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

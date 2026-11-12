@@ -1,5 +1,6 @@
 package com.routemesh.workflowservice.config;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
@@ -13,8 +14,14 @@ import com.routemesh.workflowservice.workflow.DispatchWorkflowImpl;
 import com.routemesh.workflowservice.workflow.ShipmentWorkflowImpl;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.opentracingshim.OpenTracingShim;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowClientOptions;
+import io.temporal.common.interceptors.WorkerInterceptor;
+import io.temporal.opentracing.OpenTracingClientInterceptor;
+import io.temporal.opentracing.OpenTracingOptions;
+import io.temporal.opentracing.OpenTracingWorkerInterceptor;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 import io.temporal.serviceclient.WorkflowServiceStubsOptions;
 import io.temporal.worker.Worker;
@@ -30,19 +37,40 @@ class TemporalConfiguration {
                 WorkflowServiceStubsOptions.newBuilder().setTarget(properties.target()).build());
     }
 
+    /**
+     * İz bağlamını Temporal başlıklarıyla taşır: istek -> iş akışı -> etkinlik (gRPC) tek iz olur. Temporal'in
+     * OpenTracing arayüzü OpenTelemetry'ye shim ile bağlanır; OpenTelemetry yoksa (izleme kapalı bağlam) atlanır.
+     */
     @Bean
-    WorkflowClient workflowClient(WorkflowServiceStubs stubs, TemporalProperties properties) {
-        return WorkflowClient.newInstance(stubs,
-                WorkflowClientOptions.newBuilder().setNamespace(properties.namespace()).build());
+    OpenTracingOptions temporalTracingOptions(ObjectProvider<OpenTelemetry> openTelemetry) {
+        OpenTelemetry otel = openTelemetry.getIfAvailable();
+        return otel == null ? null
+                : OpenTracingOptions.newBuilder().setTracer(OpenTracingShim.createTracerShim(otel)).build();
+    }
+
+    @Bean
+    WorkflowClient workflowClient(WorkflowServiceStubs stubs, TemporalProperties properties,
+            ObjectProvider<OpenTracingOptions> tracing) {
+        WorkflowClientOptions.Builder options = WorkflowClientOptions.newBuilder().setNamespace(properties.namespace());
+        OpenTracingOptions tracingOptions = tracing.getIfAvailable();
+        if (tracingOptions != null) {
+            options.setInterceptors(new OpenTracingClientInterceptor(tracingOptions));
+        }
+        return WorkflowClient.newInstance(stubs, options.build());
     }
 
     @Bean
     @ConditionalOnProperty(name = "routemesh.temporal.worker-enabled", havingValue = "true")
     SmartLifecycle shipmentWorker(WorkflowClient client, TemporalProperties properties,
             ShipmentActivities activities, DispatchActivities dispatchActivities,
-            SettlementActivities settlementActivities, MeterRegistry meters) {
-        WorkerFactory factory = WorkerFactory.newInstance(client, WorkerFactoryOptions.newBuilder()
-                .setWorkerInterceptors(new WorkflowMetricsInterceptor(meters)).build());
+            SettlementActivities settlementActivities, MeterRegistry meters, ObjectProvider<OpenTracingOptions> tracing) {
+        OpenTracingOptions tracingOptions = tracing.getIfAvailable();
+        WorkerInterceptor[] interceptors = tracingOptions == null
+                ? new WorkerInterceptor[] {new WorkflowMetricsInterceptor(meters)}
+                : new WorkerInterceptor[] {new OpenTracingWorkerInterceptor(tracingOptions),
+                        new WorkflowMetricsInterceptor(meters)};
+        WorkerFactory factory = WorkerFactory.newInstance(client,
+                WorkerFactoryOptions.newBuilder().setWorkerInterceptors(interceptors).build());
         Worker worker = factory.newWorker(properties.taskQueue());
         worker.registerWorkflowImplementationTypes(ShipmentWorkflowImpl.class, DispatchWorkflowImpl.class,
                 SettlementWorkflowImpl.class);

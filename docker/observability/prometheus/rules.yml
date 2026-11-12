@@ -1,0 +1,72 @@
+# Temel uyarılar. Alertmanager yoktur: kurallar Prometheus ve Grafana'da görünür, bildirim gönderilmez.
+groups:
+  - name: routemesh-availability
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.job }} metrik ucuna ulaşılamıyor"
+          description: "{{ $labels.job }} 2 dakikadır scrape edilemiyor (servis düşmüş ya da sağlıksız)."
+
+  - name: routemesh-http
+    rules:
+      - alert: HighHttpErrorRate
+        expr: |
+          sum by (application) (rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+            / sum by (application) (rate(http_server_requests_seconds_count[5m])) > 0.05
+          and sum by (application) (rate(http_server_requests_seconds_count[5m])) > 0.1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.application }} 5xx oranı yüksek"
+          description: "{{ $labels.application }} isteklerinin {{ $value | humanizePercentage }} kadarı son 5 dakikada 5xx döndü."
+
+  - name: routemesh-ledger
+    rules:
+      - alert: LedgerCheckpointLag
+        expr: routemesh_ledger_integrity_checkpoint_lag_entries > 50000
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "Defter checkpoint'i geride"
+          description: "Checkpoint'in kapsamadığı {{ $value }} kayıt var; artımlı bütünlük denetimi çalışmıyor ya da yetişemiyor."
+      - alert: LedgerIntegrityViolation
+        expr: increase(routemesh_ledger_integrity_runs_total{status="VIOLATIONS"}[1h]) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "Defter bütünlük ihlali"
+          description: "Son saatte bütünlük denetimi ihlal buldu (mod {{ $labels.mode }}); OPS bulgu uçlarını inceleyin."
+      - alert: LedgerIntegrityRunFailed
+        expr: increase(routemesh_ledger_integrity_runs_total{status="FAILED"}[1h]) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Defter bütünlük denetimi çalıştırılamadı"
+          description: "Son saatte {{ $labels.mode }} koşusu FAILED bitti."
+
+  - name: routemesh-reconciliation
+    rules:
+      - alert: ReconciliationDiscrepancies
+        expr: increase(routemesh_payment_reconciliation_runs_total{status="DISCREPANCIES"}[1h]) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "PSP mutabakatı tutarsızlık buldu"
+          description: "Son saatte mutabakat koşusu bulgu üretti; OPS mutabakat uçlarını inceleyin."
+      - alert: ReconciliationStale
+        expr: time() - routemesh_payment_reconciliation_last_success_timestamp_seconds > 7200
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Mutabakat 2 saattir başarıyla tamamlanmadı"
+          description: "Son başarılı mutabakat koşusundan bu yana {{ $value | humanizeDuration }} geçti (hiç koşu yoksa değer çok büyüktür)."
+
+  - name: routemesh-kafka
+    rules:
+      - alert: DeadLetterGrowth
+        expr: increase(routemesh_notification_dlt_messages_total[15m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "Ölü mektup konusuna kayıt yazıldı"
+          description: "notification-service son 15 dakikada {{ $labels.topic }} kaynağından {{ $value }} kaydı DLT'ye gönderdi."

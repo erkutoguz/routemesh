@@ -63,13 +63,16 @@ class ObservabilityTest {
 
     @Test
     void prometheusMetricsAreServedWithoutAuthenticationAndCarryTheApplicationTag() throws Exception {
+        get("/api/v1/wallets/me", null);
         get("/actuator/health", null);
 
         HttpResponse<String> response = get("/actuator/prometheus", null);
 
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.body()).contains("jvm_memory_used_bytes").contains("application=\"ledger-service\"")
-                .contains("http_server_requests_seconds_bucket");
+                .contains("http_server_requests_seconds_bucket")
+                // Sağlık denetimi ve scrape gözlemlenmez: iz ve HTTP metriği üretmez
+                .doesNotContain("uri=\"/actuator/health\"").doesNotContain("uri=\"/actuator/prometheus\"");
     }
 
     @Test
@@ -87,11 +90,11 @@ class ObservabilityTest {
     void anIncomingHttpTraceContinuesInTheServerSpan() throws Exception {
         String traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
 
-        HttpResponse<String> response = http.send(HttpRequest.newBuilder(uri("/actuator/health"))
+        HttpResponse<String> response = http.send(HttpRequest.newBuilder(uri("/api/v1/wallets/me"))
                 .header("traceparent", "00-" + traceId + "-00f067aa0ba902b7-01").GET().build(),
                 HttpResponse.BodyHandlers.ofString());
 
-        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.statusCode()).isEqualTo(401);
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(spans.getFinishedSpanItems())
                 .anySatisfy(span -> {
                     assertThat(span.getKind()).isEqualTo(SpanKind.SERVER);

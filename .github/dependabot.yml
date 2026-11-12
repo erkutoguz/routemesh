@@ -17,6 +17,7 @@ updates:
       - "/fleet-service"
       - "/surge-service"
       - "/notification-service"
+      - "/search-service"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

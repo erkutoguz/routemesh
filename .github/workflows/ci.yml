@@ -37,6 +37,7 @@ jobs:
           - fleet-service
           - surge-service
           - notification-service
+          - search-service
 
     name: Test ${{ matrix.service }}
 

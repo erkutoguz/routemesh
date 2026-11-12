@@ -15,6 +15,7 @@ public record NotificationProperties(
         String inboxCleanupCron,
         Sms sms) {
 
-    public record Sms(boolean logBody) {
+    /** @param sinkFile boş ya da null: kapalı. Yalnızca geliştirme/test; prod profilinde verilirse uygulama başlamaz. */
+    public record Sms(boolean logBody, String sinkFile) {
     }
 }

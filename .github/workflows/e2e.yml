@@ -1,0 +1,59 @@
+name: routemesh E2E smoke
+
+# Ağır yığın (altyapı + 12 uygulama) PR başına koşmaz: elle tetiklenir ya da her gece çalışır.
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "17 2 * * *" # her gece 02:17 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    env:
+      # Tempo bu yığında yok (observability profili çalışmıyor); iz ihracı bağlantı hatası günlüğü basmasın
+      TRACING_EXPORT: "false"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Build images
+        working-directory: docker
+        run: docker compose --profile e2e build
+
+      - name: Run E2E smoke test
+        working-directory: docker
+        run: docker compose --profile e2e run --rm e2e
+
+      - name: Collect container logs
+        if: failure()
+        working-directory: docker
+        run: |
+          mkdir -p ../e2e-logs
+          for service in $(docker compose --profile e2e config --services); do
+            docker compose --profile e2e logs --no-color --timestamps "$service" > "../e2e-logs/$service.log" 2>&1 || true
+          done
+          docker compose --profile e2e ps -a > ../e2e-logs/ps.txt 2>&1 || true
+
+      - name: Upload container logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-logs
+          path: e2e-logs
+          retention-days: 7
+
+      - name: Tear down
+        if: always()
+        working-directory: docker
+        run: docker compose --profile e2e down -v --remove-orphans

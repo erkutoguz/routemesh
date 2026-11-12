@@ -12,6 +12,7 @@ README.md
 docs/
 docker/
 !docker/service.Dockerfile
+!docker/e2e/
 **/*.log
 **/.DS_Store
 **/Thumbs.db

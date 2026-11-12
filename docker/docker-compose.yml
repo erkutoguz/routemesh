@@ -8,6 +8,7 @@ x-app: &app
   restart: unless-stopped
   profiles:
     - apps
+    - e2e
   mem_limit: 512m
 
 x-security-env: &security-env
@@ -151,6 +152,7 @@ services:
     profiles:
       - cdc-register
       - apps
+      - e2e
     depends_on:
       connect:
         condition: service_healthy
@@ -477,6 +479,10 @@ services:
       <<: [*otel-env, *security-env, *token-env, *kafka-env]
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/notification
       SPRING_GRPC_CLIENT_CHANNEL_SHIPMENT_TARGET: static://shipment-service:9092
+      # Geliştirme/test: alıcı SMS'leri (OTP dahil) açık yazılır; yalnızca e2e çalıştırıcısı hacmi salt okunur bağlar
+      ROUTEMESH_NOTIFICATION_SMS_SINK_FILE: /sms/sink.jsonl
+    volumes:
+      - sms-sink:/sms
     depends_on:
       postgres:
         condition: service_healthy
@@ -597,7 +603,60 @@ services:
       retries: 12
       start_period: 15s
 
+  # ---------------------------------------------------------------------------------------------------------
+  # Uçtan uca duman testi: `docker compose --profile e2e run --rm e2e` (tüm yığını kaldırır, mutlu yolu koşar).
+  # Tempo olmayan ortamda (CI) `TRACING_EXPORT=false` verin. Çıkış kodu testin sonucudur.
+  # ---------------------------------------------------------------------------------------------------------
+  e2e:
+    build:
+      context: ..
+      dockerfile: docker/e2e/Dockerfile
+    image: routemesh/e2e:dev
+    container_name: routemesh-e2e
+    profiles:
+      - e2e
+    environment:
+      GATEWAY_URL: http://api-gateway:8080
+      KEYCLOAK_URL: http://keycloak:8180
+      PSP_SIMULATOR_URL: http://psp-simulator:8085
+      CONNECT_URL: http://connect:8083
+      SMS_SINK_FILE: /sms/sink.jsonl
+    volumes:
+      - sms-sink:/sms:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      connect-init:
+        condition: service_completed_successfully
+      api-gateway:
+        condition: service_healthy
+      shipment-service:
+        condition: service_healthy
+      pricing-service:
+        condition: service_healthy
+      ledger-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      psp-simulator:
+        condition: service_healthy
+      fleet-service:
+        condition: service_healthy
+      location-service:
+        condition: service_healthy
+      surge-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      search-service:
+        condition: service_healthy
+      workflow-service:
+        condition: service_healthy
+
 volumes:
+  sms-sink:
   prometheus-data:
   tempo-data:
   grafana-data:

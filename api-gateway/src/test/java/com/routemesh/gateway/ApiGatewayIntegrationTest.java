@@ -55,6 +55,8 @@ class ApiGatewayIntegrationTest {
     private static final HttpServer LEDGER_UPSTREAM = startLedgerUpstream();
     private static final AtomicReference<String> notificationCall = new AtomicReference<>();
     private static final HttpServer NOTIFICATION_UPSTREAM = startNotificationUpstream();
+    private static final AtomicReference<String> searchCall = new AtomicReference<>();
+    private static final HttpServer SEARCH_UPSTREAM = startSearchUpstream();
 
     private final HttpClient client = HttpClient.newHttpClient();
 
@@ -75,6 +77,8 @@ class ApiGatewayIntegrationTest {
                 () -> "http://localhost:" + LEDGER_UPSTREAM.getAddress().getPort());
         registry.add("routemesh.upstreams.notification",
                 () -> "http://localhost:" + NOTIFICATION_UPSTREAM.getAddress().getPort());
+        registry.add("routemesh.upstreams.search",
+                () -> "http://localhost:" + SEARCH_UPSTREAM.getAddress().getPort());
     }
 
     @AfterAll
@@ -85,6 +89,7 @@ class ApiGatewayIntegrationTest {
         TRACKING_UPSTREAM.stop(0);
         LEDGER_UPSTREAM.stop(0);
         NOTIFICATION_UPSTREAM.stop(0);
+        SEARCH_UPSTREAM.stop(0);
     }
 
     @BeforeEach
@@ -92,6 +97,7 @@ class ApiGatewayIntegrationTest {
         upstreamAuthorization.set(null);
         upstreamPath.set(null);
         workflowCall.set(null);
+        searchCall.set(null);
     }
 
     @Test
@@ -175,8 +181,11 @@ class ApiGatewayIntegrationTest {
 
         assertThat(get("/api/v1/ops/shipments", merchant).statusCode()).isEqualTo(403);
         assertThat(upstreamPath.get()).isNull();
+        assertThat(searchCall.get()).isNull();
+        assertThat(get("/api/v1/ops/shipments/1/history", ops).statusCode()).isEqualTo(200);
+        assertThat(upstreamPath.get()).isEqualTo("/api/v1/ops/shipments/1/history");
         assertThat(get("/api/v1/ops/shipments", ops).statusCode()).isEqualTo(200);
-        assertThat(upstreamPath.get()).isEqualTo("/api/v1/ops/shipments");
+        assertThat(searchCall.get()).isEqualTo("GET /api/v1/ops/shipments Bearer " + ops);
     }
 
     @Test
@@ -278,6 +287,69 @@ class ApiGatewayIntegrationTest {
     }
 
     @Test
+    void searchPathsReachTheSearchServiceWithTheCallersTokenUntouched() throws Exception {
+        String token = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("MERCHANT"), 300);
+
+        assertThat(get("/api/v1/search/shipments?status=PAID&limit=5&cursor=abc", token).statusCode()).isEqualTo(200);
+
+        assertThat(searchCall.get())
+                .isEqualTo("GET /api/v1/search/shipments?status=PAID&limit=5&cursor=abc Bearer " + token);
+        assertThat(upstreamPath.get()).isNull();
+    }
+
+    @Test
+    void theListEndpointsWinOverTheShipmentWildcardsButOnlyForGetOnTheExactPath() throws Exception {
+        String ops = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("OPS"), 300);
+        String warehouse = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("WAREHOUSE"), 300);
+
+        // liste uçları search-service'e
+        assertThat(get("/api/v1/ops/shipments?status=PAID&merchantId=m", ops).statusCode()).isEqualTo(200);
+        assertThat(searchCall.get()).isEqualTo("GET /api/v1/ops/shipments?status=PAID&merchantId=m Bearer " + ops);
+        assertThat(upstreamPath.get()).isNull();
+        searchCall.set(null);
+        assertThat(get("/api/v1/warehouse/shipments?status=PAID,AT_WAREHOUSE", warehouse).statusCode())
+                .isEqualTo(200);
+        assertThat(searchCall.get())
+                .isEqualTo("GET /api/v1/warehouse/shipments?status=PAID%2CAT_WAREHOUSE Bearer " + warehouse);
+        assertThat(upstreamPath.get()).isNull();
+
+        // alt yollar ve diğer yöntemler shipment-service'te kalır
+        for (String[] call : new String[][] {
+                {"GET", "/api/v1/ops/shipments/1/history", ops},
+                {"POST", "/api/v1/warehouse/shipments/1/receive", warehouse},
+                {"POST", "/api/v1/warehouse/shipments/1/ready", warehouse},
+                {"POST", "/api/v1/warehouse/shipments/receive", warehouse},
+                {"POST", "/api/v1/warehouse/shipments/ready", warehouse},
+                {"POST", "/api/v1/warehouse/shipments", warehouse},
+                {"POST", "/api/v1/ops/shipments", ops}}) {
+            searchCall.set(null);
+            upstreamPath.set(null);
+            assertThat(send(call[0], call[1], call[2]).statusCode()).as("%s %s", call[0], call[1]).isEqualTo(200);
+            assertThat(upstreamPath.get()).as("%s %s", call[0], call[1]).isEqualTo(call[1]);
+            assertThat(searchCall.get()).as("%s %s", call[0], call[1]).isNull();
+        }
+    }
+
+    @Test
+    void searchAndListPathsWithoutAValidTokenNeverReachTheSearchService() throws Exception {
+        String wrongAudience = token(SIGNING_KEY, ISSUER, List.of("account"), List.of("OPS"), 300);
+        String expired = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("OPS"), -300);
+        String foreign = token(FOREIGN_KEY, ISSUER, List.of("routemesh-api"), List.of("OPS"), 300);
+        String merchant = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("MERCHANT"), 300);
+
+        for (String path : new String[] {"/api/v1/search/shipments", "/api/v1/ops/shipments",
+                "/api/v1/warehouse/shipments"}) {
+            assertThat(get(path, null).statusCode()).as(path).isEqualTo(401);
+            assertThat(get(path, wrongAudience).statusCode()).as(path).isEqualTo(401);
+            assertThat(get(path, expired).statusCode()).as(path).isEqualTo(401);
+            assertThat(get(path, foreign).statusCode()).as(path).isEqualTo(401);
+        }
+        // /ops/** gateway'de OPS rolü ister
+        assertThat(get("/api/v1/ops/shipments", merchant).statusCode()).isEqualTo(403);
+        assertThat(searchCall.get()).isNull();
+    }
+
+    @Test
     void trackingStreamWithoutTokenIsRejectedAtTheGateway() throws Exception {
         trackingCall.set(null);
 
@@ -374,6 +446,27 @@ class ApiGatewayIntegrationTest {
             server.createContext("/", exchange -> {
                 String query = exchange.getRequestURI().getRawQuery();
                 notificationCall.set(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath()
+                        + (query == null ? "" : "?" + query) + " "
+                        + exchange.getRequestHeaders().getFirst("Authorization"));
+                byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            server.start();
+            return server;
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static HttpServer startSearchUpstream() {
+        try {
+            HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+            server.createContext("/", exchange -> {
+                String query = exchange.getRequestURI().getRawQuery();
+                searchCall.set(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath()
                         + (query == null ? "" : "?" + query) + " "
                         + exchange.getRequestHeaders().getFirst("Authorization"));
                 byte[] body = "{}".getBytes(StandardCharsets.UTF_8);

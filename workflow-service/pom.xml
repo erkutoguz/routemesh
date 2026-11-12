@@ -29,6 +29,16 @@
             <artifactId>temporal-sdk</artifactId>
             <version>${temporal.version}</version>
         </dependency>
+        <!-- İz bağlamı Temporal sınırından geçer: istek -> iş akışı -> etkinlik (gRPC) tek iz -->
+        <dependency>
+            <groupId>io.temporal</groupId>
+            <artifactId>temporal-opentracing</artifactId>
+            <version>${temporal.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-opentracing-shim</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>

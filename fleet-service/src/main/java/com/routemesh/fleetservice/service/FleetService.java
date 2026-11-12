@@ -106,6 +106,18 @@ public class FleetService {
         }));
     }
 
+    /**
+     * Gönderi terminal duruma geçtiğinde onu tutan kuryeyi bırakır. Kurye kimliği olaydan gelmez (ASSIGNED -> CANCELLED'da
+     * gönderideki kurye temizlenir), bu yüzden filo tarafındaki {@code active_shipment_id} kaynak alınır. Tutan kurye
+     * yoksa ya da zaten bırakılmışsa {@code false} döner (idempotent); asıl bırakma kilitli ve koşullu
+     * {@link #releaseCourier} ile yapılır.
+     */
+    public boolean releaseCourierOfShipment(UUID shipmentId) {
+        return repository.findCourierIdByActiveShipment(shipmentId)
+                .map(courierId -> releaseCourier(courierId, shipmentId))
+                .orElse(false);
+    }
+
     public Courier setStatus(UUID courierId, CourierStatus target) {
         if (target == CourierStatus.BUSY) {
             throw invalid("status can only be set to IDLE or OFFLINE");

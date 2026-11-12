@@ -270,6 +270,34 @@ class FleetServiceTest {
     }
 
     @Test
+    void releaseByShipmentFindsTheHoldingCourierAndIsIdempotent() {
+        UUID courier = idleCourier();
+        UUID other = idleCourier();
+        UUID shipment = UUID.randomUUID();
+        UUID otherShipment = UUID.randomUUID();
+        Offer offered = offer(courier, shipment, 1000, 60).offer();
+        service.accept(courier, offered.offerId());
+        service.accept(other, offer(other, otherShipment, 1000, 60).offer().offerId());
+
+        assertThat(service.releaseCourierOfShipment(UUID.randomUUID())).isFalse(); // tutan yok
+        assertThat(service.findCourier(courier).orElseThrow().status()).isEqualTo(CourierStatus.BUSY);
+
+        assertThat(service.releaseCourierOfShipment(shipment)).isTrue();
+        assertThat(service.releaseCourierOfShipment(shipment)).isFalse(); // yeniden teslim edilen olay
+
+        Courier idle = service.findCourier(courier).orElseThrow();
+        assertThat(idle.status()).isEqualTo(CourierStatus.IDLE);
+        assertThat(idle.activeShipmentId()).isNull();
+        assertThat(service.getOffer(offered.offerId()).status()).isEqualTo(OfferStatus.RELEASED);
+        // başka gönderiyi tutan kurye etkilenmez
+        Courier stillBusy = service.findCourier(other).orElseThrow();
+        assertThat(stillBusy.status()).isEqualTo(CourierStatus.BUSY);
+        assertThat(stillBusy.activeShipmentId()).isEqualTo(otherShipment);
+        // serbest kalan kurye yeni teklif alabilir
+        assertThat(offer(courier, UUID.randomUUID(), 1000, 60).offer().status()).isEqualTo(OfferStatus.OFFERED);
+    }
+
+    @Test
     void fenceTokensOnlyMoveForwardAndStaleWritersAreRejected() {
         UUID courier = idleCourier();
         Offer offered = offer(courier, UUID.randomUUID(), 1000, 60).offer();

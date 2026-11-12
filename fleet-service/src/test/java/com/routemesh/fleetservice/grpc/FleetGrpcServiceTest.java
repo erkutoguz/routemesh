@@ -21,6 +21,7 @@ import com.routemesh.contracts.fleet.FleetServiceGrpc;
 import com.routemesh.contracts.fleet.GetOfferRequest;
 import com.routemesh.contracts.fleet.Offer;
 import com.routemesh.contracts.fleet.OfferStatus;
+import com.routemesh.contracts.fleet.ReleaseCourierByShipmentRequest;
 import com.routemesh.contracts.fleet.ReleaseCourierRequest;
 import com.routemesh.fleetservice.TestcontainersConfiguration;
 import com.routemesh.fleetservice.domain.CourierStatus;
@@ -90,6 +91,21 @@ class FleetGrpcServiceTest {
     }
 
     @Test
+    void releaseByShipmentNeedsNoCourierIdAndIsIdempotent() {
+        UUID courier = idleCourier();
+        CreateOfferRequest request = request(courier, UUID.randomUUID(), 1000);
+        stub.createOffer(request);
+        fleetService.accept(courier, UUID.fromString(request.getOfferId()));
+        var release = ReleaseCourierByShipmentRequest.newBuilder().setShipmentId(request.getShipmentId()).build();
+
+        assertThat(stub.releaseCourierByShipment(release).getReleased()).isTrue();
+        assertThat(stub.releaseCourierByShipment(release).getReleased()).isFalse();
+        assertThat(fleetService.findCourier(courier).orElseThrow().status()).isEqualTo(CourierStatus.IDLE);
+        assertCode(() -> stub.releaseCourierByShipment(ReleaseCourierByShipmentRequest.newBuilder()
+                .setShipmentId("x").build()), Status.Code.INVALID_ARGUMENT);
+    }
+
+    @Test
     void errorsAreMappedToStatusCodes() {
         UUID courier = idleCourier();
         UUID shipment = UUID.randomUUID();
@@ -134,6 +150,8 @@ class FleetGrpcServiceTest {
 
             assertCode(() -> other.createOffer(request(UUID.randomUUID(), UUID.randomUUID(), 1000)),
                     Status.Code.PERMISSION_DENIED);
+            assertCode(() -> other.releaseCourierByShipment(ReleaseCourierByShipmentRequest.newBuilder()
+                    .setShipmentId(UUID.randomUUID().toString()).build()), Status.Code.PERMISSION_DENIED);
         }
     }
 

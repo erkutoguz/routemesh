@@ -53,6 +53,14 @@ public class FleetRepository {
                 .optional();
     }
 
+    /** Gönderiyi şu an tutan kurye (kısmi tekil indeks: bir gönderiyi en çok bir kurye tutar). */
+    public Optional<UUID> findCourierIdByActiveShipment(UUID shipmentId) {
+        return jdbc.sql("SELECT courier_id FROM couriers WHERE active_shipment_id = :shipment")
+                .param("shipment", shipmentId)
+                .query(UUID.class)
+                .optional();
+    }
+
     public Optional<Courier> findCourierForUpdate(UUID courierId) {
         return jdbc.sql("SELECT " + COURIER_COLUMNS + " FROM couriers WHERE courier_id = :id FOR UPDATE")
                 .param("id", courierId)

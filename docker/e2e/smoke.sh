@@ -96,7 +96,8 @@ step_baseline() {
   note "başlangıç bakiyeleri: merchant=$MERCHANT_WALLET_BEFORE kurye=$COURIER_WALLET_BEFORE"
 }
 
-# Önceki (yarım kalmış) bir koşudan kurye BUSY kalmış olabilir: OPS aktif gönderiyi iptal eder, kurye serbest kalır
+# Önceki (yarım kalmış) bir koşudan kurye BUSY kalmış olabilir: OPS aktif gönderiyi iptal eder; iptal olayı kuryeyi
+# CourierReleaseRelay ile kendiliğinden serbest bırakır
 release_stale_courier() {
   http GET "$GATEWAY/api/v1/fleet/me" -H "$(auth "$COURIER_TOKEN")"
   [[ "$(jq -r '.status // empty' <<<"$BODY")" == BUSY ]] || return 0
@@ -106,9 +107,6 @@ release_stale_courier() {
   local ops
   ops=$(user_token ops ops-dev)
   http POST "$GATEWAY/api/v1/shipments/$stale/transitions" -H "$(auth "$ops")" -H "Idempotency-Key: e2e-clean-$RUN_ID"     -H 'Content-Type: application/json' -d '{"toStatus":"CANCELLED","reason":"e2e cleanup"}'
-  # Gönderi iptali kuryeyi kendiliğinden serbest bırakmaz (yalnızca dağıtım iş akışının telafisi bırakır): test
-  # hesabı fleet gRPC ile bırakır
-  grpc "$WORKFLOW_TOKEN" "$FLEET_GRPC" routemesh.fleet.v1.FleetService/ReleaseCourier     "{\"courier_id\":\"$COURIER_ID\",\"shipment_id\":\"$stale\"}" >/dev/null 2>&1
   free() {
     http GET "$GATEWAY/api/v1/fleet/me" -H "$(auth "$COURIER_TOKEN")"
     [[ "$(jq -r '.status // empty' <<<"$BODY")" != BUSY ]]
@@ -339,15 +337,15 @@ step_notifications() {
   note "bildirim kutuları: merchant (SHIPMENT_DELIVERED, COURIER_APPROACHING), kurye (NEW_OFFER)"
 }
 
-# Bilinen açık: teslimat (ve iptal) sonrası kuryeyi serbest bırakan bir akış yok; yalnızca dağıtım iş akışının telafisi
-# ReleaseCourier çağırır. Kurye BUSY kalırsa yeni teklif alamaz. Düzelene kadar WARN olarak görünür.
+# Teslimat sonrası kurye CourierReleaseRelay ile (shipment.events DELIVERED/CANCELLED/LOST) serbest kalır; yeni teklif alabilmesi için şart.
 step_courier_released() {
   freed() {
     http GET "$GATEWAY/api/v1/fleet/me" -H "$(auth "$COURIER_TOKEN")"
     [[ "$(jq -r '.status // empty' <<<"$BODY")" != BUSY ]]
   }
-  retry 15 3 freed || fail "BİLİNEN AÇIK: kurye teslimattan sonra BUSY kaldı (aktif gönderi: $(jq -r '.activeShipmentId // "-"' <<<"$BODY")); sonraki koşu OPS ile temizler" || return 1
-  note "kurye teslimattan sonra IDLE'a döndü"
+  retry 30 2 freed || fail "kurye teslimattan sonra BUSY kaldı (aktif gönderi: $(jq -r '.activeShipmentId // "-"' <<<"$BODY"))" || return 1
+  [[ "$(jq -r '.activeShipmentId // empty' <<<"$BODY")" == "" ]] || fail "kuryenin aktif gönderisi temizlenmedi: $BODY" || return 1
+  note "kurye teslimattan sonra IDLE'a döndü, aktif gönderi yok"
 }
 
 echo "RouteMesh E2E duman testi | gateway=$GATEWAY | koşu=$RUN_ID"
@@ -374,7 +372,7 @@ run_step "50 m PoD ve teslimat (DELIVERED)"         step_pod_delivery
 run_step "Ledger hakediş dağıtımı %75/%18/%7"       step_settlement
 run_step "CQRS arama (/search/shipments)"           step_search
 run_step "Bildirim kutuları (/notifications)"       step_notifications
-run_soft "Kurye teslimattan sonra serbest kalıyor (bilinen açık)" step_courier_released
+run_step "Kurye teslimattan sonra IDLE (yeni teklif alabilir)" step_courier_released
 
 print_summary
 (( FAILED == 0 ))

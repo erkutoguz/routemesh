@@ -9,7 +9,9 @@ public record ShipmentCreatedEvent(
         long finalAmountMinor,
         long basePriceMinor,
         String currency,
-        String status) {
+        String status,
+        double deliveryLatitude,
+        double deliveryLongitude) {
 
     public static final String TYPE = "ShipmentCreated";
     public static final int VERSION = 1;

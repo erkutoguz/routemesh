@@ -35,6 +35,7 @@ jobs:
           - api-gateway
           - workflow-service
           - fleet-service
+          - surge-service
 
     name: Test ${{ matrix.service }}
 

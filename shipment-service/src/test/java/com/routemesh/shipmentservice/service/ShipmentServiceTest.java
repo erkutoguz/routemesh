@@ -84,6 +84,8 @@ class ShipmentServiceTest {
         assertThat(event.path("aggregateId").asString()).isEqualTo(shipment.id().toString());
         assertThat(event.path("data").path("status").asString()).isEqualTo("PENDING_PAYMENT");
         assertThat(event.path("data").path("finalAmountMinor").asLong()).isEqualTo(1001);
+        assertThat(event.path("data").path("deliveryLatitude").asDouble()).isEqualTo(40.9876);
+        assertThat(event.path("data").path("deliveryLongitude").asDouble()).isEqualTo(29.0369);
         assertThat(event.path("occurredAt").asString()).isNotBlank();
         assertThat(jdbc.queryForObject("SELECT aggregate_type FROM outbox_events WHERE aggregate_id = ?",
                 String.class, shipment.id().toString())).isEqualTo("shipment");

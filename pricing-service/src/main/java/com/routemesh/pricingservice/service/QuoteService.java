@@ -5,6 +5,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.dao.DuplicateKeyException;
@@ -158,6 +159,15 @@ public class QuoteService {
 
     private static void validate(RedeemQuoteCommand command) {
         requireKey(command.redemptionKey(), "redemption_key");
+    }
+
+    /**
+     * Noktanın fiyat bölgesi; teklifin teslimat noktası için seçtiği kuralla aynıdır (aktif bölge, en yüksek öncelik,
+     * en küçük alan). Hizmet bölgesi dışında boş döner.
+     */
+    public Optional<String> locateZone(double latitude, double longitude) {
+        validatePoint(latitude, longitude, "location");
+        return repository.findRateCard(latitude, longitude).map(RateCard::zoneCode);
     }
 
     private static void validatePoint(double latitude, double longitude, String name) {

@@ -59,6 +59,28 @@
       ]
     },
     {
+      "clientId": "surge-service",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "surge-service-dev-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "routemesh-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "routemesh-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
       "clientId": "location-service",
       "enabled": true,
       "publicClient": false,
@@ -136,6 +158,12 @@
       "username": "service-account-location-service",
       "enabled": true,
       "serviceAccountClientId": "location-service",
+      "realmRoles": ["WORKFLOW"]
+    },
+    {
+      "username": "service-account-surge-service",
+      "enabled": true,
+      "serviceAccountClientId": "surge-service",
       "realmRoles": ["WORKFLOW"]
     }
   ]

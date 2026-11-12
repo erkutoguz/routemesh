@@ -25,6 +25,7 @@ import com.routemesh.ledgerservice.domain.PostTransactionCommand;
 import com.routemesh.ledgerservice.domain.PostedTransaction;
 import com.routemesh.ledgerservice.service.LedgerException.Reason;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -45,6 +46,9 @@ class LedgerServiceTest {
     @Autowired
     private JsonMapper jsonMapper;
 
+    @Autowired
+    private MeterRegistry meters;
+
     @Test
     void post_balancedTransaction_updatesBalances() {
         UUID shipment = UUID.randomUUID();
@@ -55,6 +59,25 @@ class LedgerServiceTest {
         assertThat(posted.id()).isNotNull();
         assertThat(ledger.balance(ESCROW, shipment)).isEqualTo(1001);
         assertThat(ledger.balance(PSP, shipment)).isEqualTo(1001);
+    }
+
+    @Test
+    void postedTransactionsAreCountedByTypeAndReplaysAreNot() {
+        UUID shipment = UUID.randomUUID();
+        double before = posted("TEST_TRANSACTION");
+        PostTransactionCommand command = command(key(), shipment, debit(PSP, 500), credit(ESCROW, 500));
+
+        ledger.post(command);
+        ledger.post(command);
+        assertReason(() -> ledger.post(command(key(), shipment, debit(PSP, 500), credit(ESCROW, 400))),
+                Reason.INVALID_REQUEST);
+
+        assertThat(posted("TEST_TRANSACTION") - before).isEqualTo(1);
+    }
+
+    private double posted(String type) {
+        var counter = meters.find("routemesh.ledger.transactions.posted").tag("type", type).counter();
+        return counter == null ? 0 : counter.count();
     }
 
     @Test

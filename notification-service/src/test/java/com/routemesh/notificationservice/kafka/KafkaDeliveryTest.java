@@ -43,6 +43,7 @@ import com.routemesh.notificationservice.TestcontainersConfiguration;
 import com.routemesh.notificationservice.sms.SmsChannel;
 
 import io.grpc.Status;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.grpc.StatusRuntimeException;
 
 @Import({TestcontainersConfiguration.class, KafkaDeliveryTest.KafkaConfig.class})
@@ -73,6 +74,9 @@ class KafkaDeliveryTest {
 
     @Autowired
     private JdbcClient jdbc;
+
+    @Autowired
+    private MeterRegistry meters;
 
     @MockitoBean
     private ShipmentServiceGrpc.ShipmentServiceBlockingStub shipments;
@@ -113,6 +117,9 @@ class KafkaDeliveryTest {
 
         ConsumerRecord<String, String> dead = awaitDeadLetter(garbage);
         assertThat(dead.headers().lastHeader("kafka_dlt-exception-fqcn")).isNotNull();
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(
+                meters.get("routemesh.notification.dlt.messages").tag("topic", "shipment.events").counter().count())
+                .isGreaterThanOrEqualTo(1));
     }
 
     @Test

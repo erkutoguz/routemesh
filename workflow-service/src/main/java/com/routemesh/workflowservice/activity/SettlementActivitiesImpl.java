@@ -26,7 +26,9 @@ import com.routemesh.workflowservice.settlement.SettlementContext;
 import com.routemesh.workflowservice.settlement.SettlementKind;
 import com.routemesh.workflowservice.settlement.SettlementTemplates;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.temporal.activity.Activity;
+import io.temporal.failure.ApplicationFailure;
 
 @Component
 public class SettlementActivitiesImpl implements SettlementActivities {
@@ -37,11 +39,13 @@ public class SettlementActivitiesImpl implements SettlementActivities {
     private final PricingServiceGrpc.PricingServiceBlockingStub pricing;
     private final LedgerServiceGrpc.LedgerServiceBlockingStub ledger;
     private final PaymentServiceGrpc.PaymentServiceBlockingStub payments;
+    private final MeterRegistry meters;
 
     public SettlementActivitiesImpl(ShipmentServiceGrpc.ShipmentServiceBlockingStub shipments,
             PricingServiceGrpc.PricingServiceBlockingStub pricing,
             LedgerServiceGrpc.LedgerServiceBlockingStub ledger,
-            PaymentServiceGrpc.PaymentServiceBlockingStub payments) {
+            PaymentServiceGrpc.PaymentServiceBlockingStub payments, MeterRegistry meters) {
+        this.meters = meters;
         this.shipments = shipments;
         this.pricing = pricing;
         this.ledger = ledger;
@@ -98,7 +102,19 @@ public class SettlementActivitiesImpl implements SettlementActivities {
                             : EntryDirection.ENTRY_DIRECTION_CREDIT)
                     .setAmount(money(line.amountMinor())));
         }
-        RpcErrors.call(() -> ledger.postTransaction(request.build()));
+        // template Settlement şablonlarının işlem türüdür (sabit küme); her deneme ayrı sayılır
+        try {
+            RpcErrors.call(() -> ledger.postTransaction(request.build()));
+        } catch (RuntimeException e) {
+            countPosting(transactionType, e instanceof ApplicationFailure ? "rejected" : "error");
+            throw e;
+        }
+        countPosting(transactionType, "posted");
+    }
+
+    private void countPosting(String template, String outcome) {
+        meters.counter("routemesh.workflow.settlement.postings", "template", template, "outcome", outcome)
+                .increment();
     }
 
     @Override

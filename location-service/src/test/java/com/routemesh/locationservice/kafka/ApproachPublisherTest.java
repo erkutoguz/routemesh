@@ -21,6 +21,7 @@ import com.routemesh.locationservice.config.TrackingProperties;
 import com.routemesh.locationservice.store.CourierLocationStore;
 import com.routemesh.locationservice.store.ProximityHit;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -32,7 +33,13 @@ class ApproachPublisherTest {
     private final JsonMapper json = JsonMapper.builder().build();
     private final TrackingProperties properties = new TrackingProperties(100, 41.0, 29.0, Duration.ofHours(48),
             Duration.ofHours(24), "location.events", "courier.locations", true, 10);
-    private final ApproachPublisher publisher = new ApproachPublisher(kafka, json, properties, store);
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    private final ApproachPublisher publisher = new ApproachPublisher(kafka, json, properties, store, meters);
+
+    private double events(String kind, String outcome) {
+        var counter = meters.find("routemesh.location.approach.events").tags("kind", kind, "outcome", outcome).counter();
+        return counter == null ? 0 : counter.count();
+    }
 
     private final String shipmentId = UUID.randomUUID().toString();
     private final String courierId = UUID.randomUUID().toString();
@@ -61,6 +68,8 @@ class ApproachPublisherTest {
         assertThat(data.path("latitude").asDouble()).isEqualTo(41.1);
         assertThat(data.path("longitude").asDouble()).isEqualTo(29.2);
         verify(store, never()).rearm(hit);
+        assertThat(events("DELIVERY", "published")).isEqualTo(1);
+        assertThat(events("DELIVERY", "failed")).isZero();
     }
 
     @Test
@@ -77,6 +86,8 @@ class ApproachPublisherTest {
         publisher.publish(hit, 41.1, 29.2);
 
         verify(store).rearm(hit);
+        assertThat(events("DELIVERY", "failed")).isEqualTo(1);
+        assertThat(events("DELIVERY", "published")).isZero();
     }
 
     @Test
@@ -86,5 +97,6 @@ class ApproachPublisherTest {
         publisher.publish(hit, 41.1, 29.2);
 
         verify(store).rearm(hit);
+        assertThat(events("DELIVERY", "failed")).isEqualTo(1);
     }
 }

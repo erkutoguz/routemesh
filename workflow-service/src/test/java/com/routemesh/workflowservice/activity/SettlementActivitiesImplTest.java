@@ -43,6 +43,7 @@ import com.routemesh.workflowservice.settlement.SettlementKind;
 import com.routemesh.workflowservice.settlement.SettlementTemplates;
 
 import io.grpc.Status;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.common.RetryOptions;
 import io.temporal.failure.ActivityFailure;
@@ -65,13 +66,14 @@ class SettlementActivitiesImplTest {
     private final UUID courierId = UUID.randomUUID();
     private final String quoteId = UUID.randomUUID().toString();
 
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private TestActivityEnvironment env;
     private SettlementActivities activities;
 
     @BeforeEach
     void setUp() {
         env = TestActivityEnvironment.newInstance();
-        env.registerActivitiesImplementations(new SettlementActivitiesImpl(shipments, pricing, ledger, payments));
+        env.registerActivitiesImplementations(new SettlementActivitiesImpl(shipments, pricing, ledger, payments, meters));
         activities = env.newActivityStub(SettlementActivities.class, ActivityOptions.newBuilder()
                 .setScheduleToCloseTimeout(Duration.ofSeconds(10))
                 .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(2)
@@ -212,6 +214,27 @@ class SettlementActivitiesImplTest {
         assertThat(sent.getEntries(1).getDirection()).isEqualTo(EntryDirection.ENTRY_DIRECTION_CREDIT);
         assertThat(sent.getEntries(0).getAmount().getAmountMinor()).isEqualTo(1001);
         assertThat(sent.getEntries(0).getAmount().getCurrency()).isEqualTo("TRY");
+        assertThat(posting("DELIVERY_SETTLEMENT", "posted")).isEqualTo(1);
+    }
+
+    private double posting(String template, String outcome) {
+        var counter = meters.find("routemesh.workflow.settlement.postings")
+                .tags("template", template, "outcome", outcome).counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    @Test
+    void postLedger_outagesAreCountedAsErrorsNotRejections() {
+        when(ledger.postTransaction(any(PostTransactionRequest.class)))
+                .thenThrow(new io.grpc.StatusRuntimeException(Status.UNAVAILABLE));
+        List<SettlementTemplates.Line> lines = List.of(new SettlementTemplates.Line("LIABILITY:ESCROW", true, 1));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> activities.postLedger(shipmentId, "LOST_SETTLEMENT", lines))
+                .isInstanceOf(RuntimeException.class);
+
+        assertThat(posting("LOST_SETTLEMENT", "error")).isEqualTo(1); // her deneme ayrı sayılır (test ortamı yeniden denemez)
+        assertThat(posting("LOST_SETTLEMENT", "rejected")).isZero();
+        assertThat(posting("LOST_SETTLEMENT", "posted")).isZero();
     }
 
     @Test
@@ -222,6 +245,7 @@ class SettlementActivitiesImplTest {
         assertRejected(() -> activities.postLedger(shipmentId, "DELIVERY_SETTLEMENT",
                 List.of(new SettlementTemplates.Line("LIABILITY:ESCROW", true, 1))), "FAILED_PRECONDITION");
         verify(ledger, org.mockito.Mockito.times(1)).postTransaction(any());
+        assertThat(posting("DELIVERY_SETTLEMENT", "rejected")).isEqualTo(1);
     }
 
     @Test

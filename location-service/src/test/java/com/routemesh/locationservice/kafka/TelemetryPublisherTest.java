@@ -38,7 +38,7 @@ class TelemetryPublisherTest {
     }
 
     private double dropped() {
-        return meters.get("location.telemetry.dropped").counter().count();
+        return meters.get("routemesh.location.telemetry.dropped").counter().count();
     }
 
     @AfterEach

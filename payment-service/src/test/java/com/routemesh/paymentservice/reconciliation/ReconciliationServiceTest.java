@@ -94,6 +94,36 @@ class ReconciliationServiceTest extends PaymentTestBase {
         assertThat(row.get("shipment_id")).isNotNull();
     }
 
+    @Test
+    void runsAndFindingsAreCountedByStatusAndType_andTheSuccessGaugeAdvancesOnlyOnCompletedRuns() {
+        double clean = counter("routemesh.payment.reconciliation.runs", "status", "OK");
+        double withFindings = counter("routemesh.payment.reconciliation.runs", "status", "DISCREPANCIES");
+        double failed = counter("routemesh.payment.reconciliation.runs", "status", "FAILED");
+        double mismatches = counter("routemesh.payment.reconciliation.findings", "type", Finding.STATUS_MISMATCH);
+        double beforeRun = System.currentTimeMillis() / 1000.0 - 1;
+
+        pair("CAPTURED", 1000, 0, "CAPTURED", 1000, 0);
+        run();
+        pair("AUTHORIZED", 0, 0, "CAPTURED", 0, 0);
+        run();
+
+        assertThat(counter("routemesh.payment.reconciliation.runs", "status", "OK") - clean).isEqualTo(1);
+        assertThat(counter("routemesh.payment.reconciliation.runs", "status", "DISCREPANCIES") - withFindings)
+                .isEqualTo(1);
+        assertThat(counter("routemesh.payment.reconciliation.findings", "type", Finding.STATUS_MISMATCH) - mismatches)
+                .isEqualTo(1);
+        double lastSuccess = meters.get("routemesh.payment.reconciliation.last.success.timestamp.seconds").gauge()
+                .value();
+        assertThat(lastSuccess).isGreaterThan(beforeRun);
+
+        psp.reportFails(true);
+        run();
+
+        assertThat(counter("routemesh.payment.reconciliation.runs", "status", "FAILED") - failed).isEqualTo(1);
+        assertThat(meters.get("routemesh.payment.reconciliation.last.success.timestamp.seconds").gauge().value())
+                .isEqualTo(lastSuccess);
+    }
+
     // --- tek taraflı kayıtlar ---
 
     @Test

@@ -24,6 +24,8 @@ import com.routemesh.paymentservice.domain.PaymentIntent;
 import com.routemesh.paymentservice.service.PaymentService;
 import com.routemesh.paymentservice.webhook.WebhookService;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -47,6 +49,15 @@ public abstract class PaymentTestBase {
 
     @Autowired
     protected JsonMapper jsonMapper;
+
+    @Autowired
+    protected MeterRegistry meters;
+
+    /** Sayaç henüz oluşmadıysa 0; testler aynı bağlamı paylaştığı için farklarla karşılaştırılır. */
+    protected double counter(String name, String... tags) {
+        Counter found = meters.find(name).tags(tags).counter();
+        return found == null ? 0 : found.count();
+    }
 
     @BeforeEach
     void resetPsp() {

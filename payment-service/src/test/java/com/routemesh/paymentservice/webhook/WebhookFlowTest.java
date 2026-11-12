@@ -42,6 +42,36 @@ class WebhookFlowTest extends PaymentTestBase {
     }
 
     @Test
+    void webhookOutcomesAndStatusTransitionsAreCounted() {
+        double applied = counter("routemesh.payment.webhooks", "outcome", "APPLIED");
+        double duplicate = counter("routemesh.payment.webhooks", "outcome", "DUPLICATE");
+        double ignored = counter("routemesh.payment.webhooks", "outcome", "IGNORED");
+        double unknown = counter("routemesh.payment.webhooks", "outcome", "UNKNOWN_PAYMENT");
+        double malformed = counter("routemesh.payment.webhooks", "outcome", "MALFORMED");
+        double authorized = counter("routemesh.payment.status.transitions", "from_status", "CREATED",
+                "to_status", "AUTHORIZED");
+        PaymentIntent intent = newIntent();
+        String body = eventBody("evt_" + UUID.randomUUID(), "payment.authorized", intent.pspPaymentId(), 1001, "TRY",
+                null);
+
+        deliverRaw(body);
+        deliverRaw(body);
+        deliver("payment.authorized", intent, 1001); // zaten AUTHORIZED
+        deliverRaw(eventBody("evt_" + UUID.randomUUID(), "payment.authorized", "psp_nobody_" + UUID.randomUUID(),
+                1001, "TRY", null));
+        assertThatThrownBy(() -> deliverRaw("{\"id\":\"\",\"type\":\"payment.authorized\",\"data\":{}}"))
+                .isInstanceOf(MalformedWebhookException.class);
+
+        assertThat(counter("routemesh.payment.webhooks", "outcome", "APPLIED") - applied).isEqualTo(1);
+        assertThat(counter("routemesh.payment.webhooks", "outcome", "DUPLICATE") - duplicate).isEqualTo(1);
+        assertThat(counter("routemesh.payment.webhooks", "outcome", "IGNORED") - ignored).isEqualTo(1);
+        assertThat(counter("routemesh.payment.webhooks", "outcome", "UNKNOWN_PAYMENT") - unknown).isEqualTo(1);
+        assertThat(counter("routemesh.payment.webhooks", "outcome", "MALFORMED") - malformed).isEqualTo(1);
+        assertThat(counter("routemesh.payment.status.transitions", "from_status", "CREATED",
+                "to_status", "AUTHORIZED") - authorized).isEqualTo(1);
+    }
+
+    @Test
     void duplicateDelivery_isAppliedOnce() {
         PaymentIntent intent = newIntent();
         String body = eventBody("evt_" + UUID.randomUUID(), "payment.authorized", intent.pspPaymentId(), 1001, "TRY",

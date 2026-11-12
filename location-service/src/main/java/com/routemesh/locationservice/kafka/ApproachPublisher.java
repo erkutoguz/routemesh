@@ -15,6 +15,8 @@ import com.routemesh.locationservice.config.TrackingProperties;
 import com.routemesh.locationservice.store.CourierLocationStore;
 import com.routemesh.locationservice.store.ProximityHit;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -31,13 +33,20 @@ public class ApproachPublisher {
     private final JsonMapper jsonMapper;
     private final TrackingProperties properties;
     private final CourierLocationStore store;
+    private final MeterRegistry meters;
 
     public ApproachPublisher(KafkaTemplate<String, String> kafka, JsonMapper jsonMapper,
-                             TrackingProperties properties, CourierLocationStore store) {
+                             TrackingProperties properties, CourierLocationStore store, MeterRegistry meters) {
         this.kafka = kafka;
         this.jsonMapper = jsonMapper;
         this.properties = properties;
         this.store = store;
+        this.meters = meters;
+    }
+
+    // kind yalnızca PICKUP / DELIVERY, outcome yalnızca published / failed
+    private void count(ProximityHit hit, String outcome) {
+        meters.counter("routemesh.location.approach.events", "kind", hit.kind(), "outcome", outcome).increment();
     }
 
     public static UUID eventId(String shipmentId, String kind) {
@@ -54,6 +63,8 @@ public class ApproachPublisher {
             kafka.send(properties.approachTopic(), hit.shipmentId(), payload).whenComplete((result, error) -> {
                 if (error != null) {
                     rearm(hit, error);
+                } else {
+                    count(hit, "published");
                 }
             });
         } catch (RuntimeException e) {
@@ -62,6 +73,7 @@ public class ApproachPublisher {
     }
 
     private void rearm(ProximityHit hit, Throwable error) {
+        count(hit, "failed");
         log.warn("Approach event for shipment {} ({}) could not be published, re-arming: {}",
                 hit.shipmentId(), hit.kind(), error.toString());
         try {

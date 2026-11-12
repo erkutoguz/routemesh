@@ -26,6 +26,8 @@ import com.routemesh.locationservice.store.IngestResult;
 import com.routemesh.locationservice.store.NearbyCourier;
 import com.routemesh.locationservice.store.ProximityHit;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 class CourierLocationServiceTest {
 
     private static final String VALID_ID = "123e4567-e89b-12d3-a456-426614174000";
@@ -33,9 +35,27 @@ class CourierLocationServiceTest {
     private final CourierLocationStore store = mock(CourierLocationStore.class);
     private final ApproachPublisher approach = mock(ApproachPublisher.class);
     private final TelemetryPublisher telemetry = mock(TelemetryPublisher.class);
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private final CourierLocationService service = new CourierLocationService(
             store, new LocationProperties(Duration.ofSeconds(60), Duration.ofHours(24), 20, 100, 15000),
-            approach, telemetry);
+            approach, telemetry, meters);
+
+    private double pings(String outcome) {
+        return meters.get("routemesh.location.pings").tag("outcome", outcome).counter().count();
+    }
+
+    @Test
+    void ingest_countsAcceptedAndStalePacketsSeparately() {
+        when(store.ingest(VALID_ID, 1, 5, 41.0, 29.0)).thenReturn(IngestResult.ACCEPTED);
+        when(store.ingest(VALID_ID, 1, 4, 41.0, 29.0)).thenReturn(IngestResult.STALE);
+
+        service.ingest(VALID_ID, 1, 5, 41.0, 29.0);
+        service.ingest(VALID_ID, 1, 5, 41.0, 29.0);
+        service.ingest(VALID_ID, 1, 4, 41.0, 29.0);
+
+        assertThat(pings("accepted")).isEqualTo(2);
+        assertThat(pings("stale")).isEqualTo(1);
+    }
 
     // --- ingest ---
 

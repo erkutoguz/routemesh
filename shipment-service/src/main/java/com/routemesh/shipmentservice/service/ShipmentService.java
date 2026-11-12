@@ -30,6 +30,7 @@ import com.routemesh.shipmentservice.repository.ShipmentRepository;
 import com.routemesh.shipmentservice.repository.ShipmentRepository.StoredShipment;
 import com.routemesh.shipmentservice.service.ShipmentException.Reason;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.json.JsonMapper;
 
 @Service
@@ -46,10 +47,17 @@ public class ShipmentService {
 
     private final ShipmentRepository repository;
     private final JsonMapper jsonMapper;
+    private final MeterRegistry meters;
 
-    public ShipmentService(ShipmentRepository repository, JsonMapper jsonMapper) {
+    public ShipmentService(ShipmentRepository repository, JsonMapper jsonMapper, MeterRegistry meters) {
         this.repository = repository;
         this.jsonMapper = jsonMapper;
+        this.meters = meters;
+    }
+
+    // to_status ShipmentStatus sabit kümesidir
+    private void countTransition(ShipmentStatus toStatus) {
+        meters.counter("routemesh.shipment.transitions", "to_status", toStatus.name()).increment();
     }
 
     @Transactional
@@ -74,6 +82,7 @@ public class ShipmentService {
                 new ShipmentCreatedEvent(created.id(), created.merchantId(), created.quoteId(),
                         created.finalAmountMinor(), created.basePriceMinor(), created.currency(),
                         created.status().name(), created.deliveryLatitude(), created.deliveryLongitude()));
+        countTransition(created.status());
         return new ShipmentResult(created, false);
     }
 
@@ -132,6 +141,7 @@ public class ShipmentService {
         publish(current.id(), ShipmentStatusChangedEvent.TYPE, ShipmentStatusChangedEvent.VERSION,
                 new ShipmentStatusChangedEvent(current.id(), current.status().name(), command.toStatus().name(),
                         command.actor().name(), courierId, command.reason(), newVersion));
+        countTransition(command.toStatus());
 
         return new ShipmentResult(repository.findById(current.id()).orElseThrow(), false);
     }

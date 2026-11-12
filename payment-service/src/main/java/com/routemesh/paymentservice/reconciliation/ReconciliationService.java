@@ -31,6 +31,8 @@ import com.routemesh.paymentservice.reconciliation.ReconciliationRepository.Run;
 import com.routemesh.paymentservice.reconciliation.ReconciliationRepository.StuckTransaction;
 import com.routemesh.paymentservice.repository.PaymentRepository;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -61,11 +63,22 @@ public class ReconciliationService {
     private final TransactionTemplate tx;
     private final JsonMapper jsonMapper;
     private final ClearingCrossCheck clearing;
+    private final MeterRegistry meters;
 
     public ReconciliationService(ReconciliationRepository repository, PaymentRepository payments, PspClient psp,
                                  ReconciliationProperties properties, Clock clock,
                                  PlatformTransactionManager transactionManager, JsonMapper jsonMapper,
-                                 ClearingCrossCheck clearing) {
+                                 ClearingCrossCheck clearing, MeterRegistry meters) {
+        this.meters = meters;
+        // Her scrape'te küçük bir sorgu; yeniden başlatma ve çok kopya durumunda da doğru kalır
+        Gauge.builder("routemesh.payment.reconciliation.last.success.timestamp.seconds", repository,
+                r -> {
+                    try {
+                        return r.lastSuccessfulFinishedAt().map(at -> at.toEpochMilli() / 1000.0).orElse(0.0);
+                    } catch (RuntimeException e) {
+                        return Double.NaN;
+                    }
+                }).register(meters);
         this.repository = repository;
         this.payments = payments;
         this.psp = psp;
@@ -130,6 +143,10 @@ public class ReconciliationService {
                 publishDiscrepancy(run, status, result);
             }
         });
+        // status OK | DISCREPANCIES | FAILED; bulgu türleri Finding sabitleridir
+        meters.counter("routemesh.payment.reconciliation.runs", "status", status).increment();
+        result.forEach(finding -> meters.counter("routemesh.payment.reconciliation.findings", "type", finding.type())
+                .increment());
         if (!result.isEmpty()) {
             log.error("RECONCILIATION_DISCREPANCY run={} findings={} types={}", run.id(), result.size(),
                     new TreeSet<>(result.stream().map(Finding::type).toList()));

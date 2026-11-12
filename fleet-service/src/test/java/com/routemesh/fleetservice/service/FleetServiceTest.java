@@ -27,6 +27,8 @@ import com.routemesh.fleetservice.domain.OfferStatus;
 import com.routemesh.fleetservice.repository.FleetRepository;
 import com.routemesh.fleetservice.service.FleetException.Reason;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest(properties = "spring.grpc.server.port=0")
 class FleetServiceTest {
@@ -39,6 +41,9 @@ class FleetServiceTest {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private MeterRegistry meters;
 
     @Test
     void courierIsRegisteredOfflineAndCanToggleIdleAndOffline() {
@@ -175,6 +180,36 @@ class FleetServiceTest {
         Offer second = offer(accepting, UUID.randomUUID(), 1000, 60).offer();
         service.accept(accepting, second.offerId());
         assertReason(() -> service.reject(accepting, second.offerId()), Reason.PRECONDITION_FAILED);
+    }
+
+    @Test
+    void everyOfferStatusTransitionIsCountedOncePerStatus() {
+        double offered = transitions("OFFERED");
+        double accepted = transitions("ACCEPTED");
+        double rejected = transitions("REJECTED");
+        double released = transitions("RELEASED");
+        UUID courier = idleCourier();
+        UUID shipment = UUID.randomUUID();
+        UUID offerId = UUID.randomUUID();
+        CreateOfferCommand command = new CreateOfferCommand(offerId, shipment, courier, 1000, 60);
+
+        service.createOffer(command);
+        service.createOffer(command); // tekrar oynatma yeni geçiş sayılmaz
+        service.accept(courier, offerId);
+        service.accept(courier, offerId);
+        UUID other = idleCourier();
+        service.reject(other, offer(other, UUID.randomUUID(), 1000, 60).offer().offerId());
+        service.releaseCourier(courier, shipment);
+
+        assertThat(transitions("OFFERED") - offered).isEqualTo(2);
+        assertThat(transitions("ACCEPTED") - accepted).isEqualTo(1);
+        assertThat(transitions("REJECTED") - rejected).isEqualTo(1);
+        assertThat(transitions("RELEASED") - released).isEqualTo(1);
+    }
+
+    private double transitions(String toStatus) {
+        var counter = meters.find("routemesh.fleet.offer.transitions").tag("to_status", toStatus).counter();
+        return counter == null ? 0 : counter.count();
     }
 
     @Test

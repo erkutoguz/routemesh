@@ -13,6 +13,9 @@ import com.routemesh.locationservice.store.CourierLocationStore;
 import com.routemesh.locationservice.store.IngestResult;
 import com.routemesh.locationservice.store.NearbyCourier;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+
 @Service
 public class CourierLocationService {
 
@@ -27,13 +30,18 @@ public class CourierLocationService {
     private final LocationProperties properties;
     private final ApproachPublisher approachPublisher;
     private final TelemetryPublisher telemetryPublisher;
+    private final Counter accepted;
+    private final Counter stale;
 
     public CourierLocationService(CourierLocationStore store, LocationProperties properties,
-                                  ApproachPublisher approachPublisher, TelemetryPublisher telemetryPublisher) {
+                                  ApproachPublisher approachPublisher, TelemetryPublisher telemetryPublisher,
+                                  MeterRegistry meters) {
         this.store = store;
         this.properties = properties;
         this.approachPublisher = approachPublisher;
         this.telemetryPublisher = telemetryPublisher;
+        this.accepted = Counter.builder("routemesh.location.pings").tag("outcome", "accepted").register(meters);
+        this.stale = Counter.builder("routemesh.location.pings").tag("outcome", "stale").register(meters);
     }
 
     /**
@@ -52,6 +60,7 @@ public class CourierLocationService {
         validateCoordinates(latitude, longitude);
 
         IngestResult result = store.ingest(normalizedId, sessionEpoch, sequenceNumber, latitude, longitude);
+        (result.accepted() ? accepted : stale).increment();
         if (result.accepted()) {
             telemetryPublisher.offer(normalizedId, sessionEpoch, sequenceNumber, latitude, longitude);
             if (result.hit() != null) {

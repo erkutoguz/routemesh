@@ -37,6 +37,8 @@ import com.routemesh.ledgerservice.integrity.IntegrityService.Trigger;
 import com.routemesh.ledgerservice.repository.LedgerRepository;
 import com.routemesh.ledgerservice.service.LedgerService;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest(properties = {
         "spring.grpc.server.port=0",
@@ -62,6 +64,9 @@ class IntegrityServiceTest {
 
     @Autowired
     private DataSource dataSource;
+
+    @Autowired
+    private MeterRegistry meters;
 
     private IntegrityTestSupport ledgerSupport;
 
@@ -163,6 +168,48 @@ class IntegrityServiceTest {
         }
         assertThat(checkpoints.getLast().entryCount()).isEqualTo(30);
         assertThat(service.run(Mode.FULL, Trigger.MANUAL, null).status()).isEqualTo("OK");
+    }
+
+    // --- metrikler ---
+
+    @Test
+    void runsFindingsAndTheCheckpointLagAreExposedAsMeters() {
+        double violations = runs("INCREMENTAL", "VIOLATIONS");
+        double unbalanced = findings(Finding.UNBALANCED_TRANSACTION);
+        double fullViolations = runs("FULL", "VIOLATIONS");
+        double ok = runs("INCREMENTAL", "OK");
+        UUID shipment = UUID.randomUUID();
+        ledgerSupport.capture(shipment, 700);
+        assertThat(lag()).isEqualTo(count("ledger_entries") - repository.latestCheckpoint()
+                .map(Checkpoint::lastEntryId).orElse(0L)).isEqualTo(2);
+
+        service.run(Mode.INCREMENTAL, Trigger.MANUAL, null);
+
+        assertThat(lag()).isZero();
+        assertThat(runs("INCREMENTAL", "OK") - ok).isEqualTo(1);
+
+        ledgerSupport.rawTransaction("BROKEN", null, null, raw(PSP, "DEBIT", 900), raw(ESCROW, "CREDIT", 500));
+        assertThat(lag()).isEqualTo(2);
+        service.run(Mode.INCREMENTAL, Trigger.MANUAL, null);
+        service.run(Mode.FULL, Trigger.MANUAL, null);
+
+        assertThat(runs("INCREMENTAL", "VIOLATIONS") - violations).isEqualTo(1);
+        assertThat(findings(Finding.UNBALANCED_TRANSACTION) - unbalanced).isGreaterThanOrEqualTo(1);
+        assertThat(runs("FULL", "VIOLATIONS") - fullViolations).isEqualTo(1);
+    }
+
+    private double runs(String mode, String status) {
+        var counter = meters.find("routemesh.ledger.integrity.runs").tags("mode", mode, "status", status).counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    private double findings(String type) {
+        var counter = meters.find("routemesh.ledger.integrity.findings").tag("type", type).counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    private double lag() {
+        return meters.get("routemesh.ledger.integrity.checkpoint.lag.entries").gauge().value();
     }
 
     // --- INCREMENTAL, ihlaller ---

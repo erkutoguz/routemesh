@@ -51,6 +51,8 @@ class SearchSchemaTest {
                 .contains("(merchant_id, created_at DESC, id DESC)"));
         assertThat(indexes).anySatisfy(def -> assertThat(def).contains("(status, created_at DESC, id DESC)"));
         assertThat(indexes).anySatisfy(def -> assertThat(def).contains("(courier_id, created_at DESC, id DESC)"));
+        assertThat(indexes).anySatisfy(def -> assertThat(def)
+                .contains("(created_at DESC, id DESC) WHERE (merchant_id IS NOT NULL)"));
     }
 
     @Test

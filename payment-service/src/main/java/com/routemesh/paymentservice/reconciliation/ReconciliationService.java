@@ -17,7 +17,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import com.routemesh.contracts.events.EventEnvelope;
+import com.routemesh.contracts.events.ReconciliationDiscrepancyDetectedEvent;
 import com.routemesh.paymentservice.domain.PaymentIntent;
 import com.routemesh.paymentservice.psp.PspClient;
 import com.routemesh.paymentservice.psp.PspClient.PspPayment;
@@ -26,6 +30,8 @@ import com.routemesh.paymentservice.psp.PspUnavailableException;
 import com.routemesh.paymentservice.reconciliation.ReconciliationRepository.Run;
 import com.routemesh.paymentservice.reconciliation.ReconciliationRepository.StuckTransaction;
 import com.routemesh.paymentservice.repository.PaymentRepository;
+
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * PSP mutabakatı: PSP'nin rapor ettiği ödemeleri platformdaki ödeme niyetleriyle {@code psp_payment_id} üzerinden
@@ -45,20 +51,26 @@ public class ReconciliationService {
     private static final Logger log = LoggerFactory.getLogger(ReconciliationService.class);
     private static final int ID_BATCH = 500;
     private static final int PROBES = 3;
+    private static final String AGGREGATE_TYPE = "payment";
 
     private final ReconciliationRepository repository;
     private final PaymentRepository payments;
     private final PspClient psp;
     private final ReconciliationProperties properties;
     private final Clock clock;
+    private final TransactionTemplate tx;
+    private final JsonMapper jsonMapper;
 
     public ReconciliationService(ReconciliationRepository repository, PaymentRepository payments, PspClient psp,
-                                 ReconciliationProperties properties, Clock clock) {
+                                 ReconciliationProperties properties, Clock clock,
+                                 PlatformTransactionManager transactionManager, JsonMapper jsonMapper) {
         this.repository = repository;
         this.payments = payments;
         this.psp = psp;
         this.properties = properties;
         this.clock = clock;
+        this.tx = new TransactionTemplate(transactionManager);
+        this.jsonMapper = jsonMapper;
     }
 
     /**
@@ -103,15 +115,34 @@ public class ReconciliationService {
             log.error("RECONCILIATION_RUN_FAILED run={}", run.id(), e);
         }
         List<Finding> result = findings.result();
-        repository.insertFindings(run.id(), result);
         String status = failed ? "FAILED" : result.isEmpty() ? "OK" : "DISCREPANCIES";
-        repository.finishRun(run.id(), status, counts.pspSeen, counts.intentsChecked, result.size(),
-                error == null ? null : error.length() > 500 ? error.substring(0, 500) : error);
+        String storedError = error == null ? null : error.length() > 500 ? error.substring(0, 500) : error;
+        tx.executeWithoutResult(s -> {
+            repository.insertFindings(run.id(), result);
+            repository.finishRun(run.id(), status, counts.pspSeen, counts.intentsChecked, result.size(),
+                    storedError);
+            if (!result.isEmpty()) {
+                publishDiscrepancy(run, status, result);
+            }
+        });
         if (!result.isEmpty()) {
             log.error("RECONCILIATION_DISCREPANCY run={} findings={} types={}", run.id(), result.size(),
                     new TreeSet<>(result.stream().map(Finding::type).toList()));
         }
         return repository.findRun(run.id()).orElseThrow();
+    }
+
+    private void publishDiscrepancy(Run run, String status, List<Finding> findings) {
+        ReconciliationDiscrepancyDetectedEvent event = new ReconciliationDiscrepancyDetectedEvent(run.id(), status,
+                findings.size(), (int) findings.stream().filter(f -> Finding.CRITICAL.equals(f.severity())).count(),
+                new TreeSet<>(findings.stream().map(Finding::type).toList()).stream().toList(), run.windowFrom(),
+                run.windowTo());
+        UUID eventId = UUID.randomUUID();
+        EventEnvelope<ReconciliationDiscrepancyDetectedEvent> envelope = new EventEnvelope<>(eventId,
+                ReconciliationDiscrepancyDetectedEvent.TYPE, ReconciliationDiscrepancyDetectedEvent.VERSION,
+                clock.instant(), run.id().toString(), event);
+        payments.insertOutbox(eventId, AGGREGATE_TYPE, run.id().toString(),
+                ReconciliationDiscrepancyDetectedEvent.TYPE, jsonMapper.writeValueAsString(envelope));
     }
 
     int failStaleRuns() {

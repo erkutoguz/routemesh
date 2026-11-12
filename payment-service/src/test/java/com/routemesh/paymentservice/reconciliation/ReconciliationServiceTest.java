@@ -271,14 +271,81 @@ class ReconciliationServiceTest extends PaymentTestBase {
         insertIntent("CAPTURED", 1000, 0, "psp_gone_" + UUID.randomUUID(), base);
         psp.pspHas(pspPayment("psp_orphan_" + UUID.randomUUID(), "CAPTURED", 5, 0, base));
         String before = snapshot();
+        Integer outboxBefore = jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE type <> "
+                + "'ReconciliationDiscrepancyDetected'", Integer.class);
 
         Run run = run();
 
         assertThat(run.findingsCount()).isPositive();
         assertThat(snapshot()).isEqualTo(before);
         assertThat(psp.calls()).extracting(FakePspClient.Call::operation).containsOnly("list", "find");
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE type ILIKE '%reconcil%'",
-                Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE type <> "
+                + "'ReconciliationDiscrepancyDetected'", Integer.class)).isEqualTo(outboxBefore);
+    }
+
+    // --- outbox alarm olayı ---
+
+    @Test
+    void aRunWithFindingsWritesOneAlarmEventWithoutAnyPaymentIdentifiers() {
+        String lost = pair("AUTHORIZED", 0, 0, "CAPTURED", 1000, 0);
+        pair("CAPTURED", 1000, 0, "CAPTURED", 1000, 0);
+
+        Run run = run();
+
+        List<Map<String, Object>> events = jdbc.queryForList("SELECT aggregate_type, aggregate_id, payload::text AS "
+                + "payload FROM outbox_events WHERE type = 'ReconciliationDiscrepancyDetected' AND aggregate_id = ?",
+                run.id().toString());
+        assertThat(events).hasSize(1);
+        assertThat(events.getFirst()).containsEntry("aggregate_type", "payment");
+        var payload = jsonMapper.readTree(events.getFirst().get("payload").toString());
+        assertThat(payload.get("eventType").asString()).isEqualTo("ReconciliationDiscrepancyDetected");
+        assertThat(payload.get("eventId").asString()).isNotBlank();
+        var data = payload.get("data");
+        assertThat(data.get("runId").asString()).isEqualTo(run.id().toString());
+        assertThat(data.get("status").asString()).isEqualTo("DISCREPANCIES");
+        assertThat(data.get("findingsCount").asInt()).isEqualTo(2);
+        assertThat(data.get("criticalCount").asInt()).isEqualTo(2);
+        assertThat(data.get("types")).extracting(node -> node.asString())
+                .containsExactly("CAPTURED_AMOUNT_MISMATCH", "STATUS_MISMATCH");
+        assertThat(data.get("windowFrom").asString()).isNotBlank();
+        assertThat(events.getFirst().get("payload").toString()).doesNotContain(lost).doesNotContain("psp_")
+                .doesNotContain("shipment");
+    }
+
+    @Test
+    void aCleanRunWritesNoAlarmEvent() {
+        pair("CAPTURED", 1000, 0, "CAPTURED", 1000, 0);
+
+        Run run = run();
+
+        assertThat(run.status()).isEqualTo("OK");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE aggregate_id = ?", Integer.class,
+                run.id().toString())).isZero();
+    }
+
+    @Test
+    void anUnreachablePspStillRaisesTheAlarmBecauseTheReportCouldNotBeObtained() {
+        psp.reportFails(true);
+
+        Run run = run();
+
+        assertThat(run.status()).isEqualTo("FAILED");
+        String payload = jdbc.queryForObject("SELECT payload::text FROM outbox_events WHERE aggregate_id = ?",
+                String.class, run.id().toString());
+        assertThat(jsonMapper.readTree(payload).get("data").get("types")).extracting(node -> node.asString())
+                .containsExactly("PSP_REPORT_UNAVAILABLE");
+        assertThat(jsonMapper.readTree(payload).get("data").get("status").asString()).isEqualTo("FAILED");
+    }
+
+    @Test
+    void theFindingsTheRunRecordAndTheAlarmEventAreWrittenTogether() {
+        pair("AUTHORIZED", 0, 0, "CAPTURED", 0, 0);
+
+        Run run = run();
+
+        assertThat(run.findingsCount()).isEqualTo(findings(run).size()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE aggregate_id = ? AND type = "
+                + "'ReconciliationDiscrepancyDetected'", Integer.class, run.id().toString())).isEqualTo(1);
     }
 
     // --- koşu yaşam döngüsü ---

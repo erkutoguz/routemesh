@@ -57,6 +57,8 @@ class ApiGatewayIntegrationTest {
     private static final HttpServer NOTIFICATION_UPSTREAM = startNotificationUpstream();
     private static final AtomicReference<String> searchCall = new AtomicReference<>();
     private static final HttpServer SEARCH_UPSTREAM = startSearchUpstream();
+    private static final AtomicReference<String> paymentCall = new AtomicReference<>();
+    private static final HttpServer PAYMENT_UPSTREAM = startPaymentUpstream();
 
     private final HttpClient client = HttpClient.newHttpClient();
 
@@ -79,6 +81,8 @@ class ApiGatewayIntegrationTest {
                 () -> "http://localhost:" + NOTIFICATION_UPSTREAM.getAddress().getPort());
         registry.add("routemesh.upstreams.search",
                 () -> "http://localhost:" + SEARCH_UPSTREAM.getAddress().getPort());
+        registry.add("routemesh.upstreams.payment",
+                () -> "http://localhost:" + PAYMENT_UPSTREAM.getAddress().getPort());
     }
 
     @AfterAll
@@ -90,6 +94,7 @@ class ApiGatewayIntegrationTest {
         LEDGER_UPSTREAM.stop(0);
         NOTIFICATION_UPSTREAM.stop(0);
         SEARCH_UPSTREAM.stop(0);
+        PAYMENT_UPSTREAM.stop(0);
     }
 
     @BeforeEach
@@ -98,6 +103,7 @@ class ApiGatewayIntegrationTest {
         upstreamPath.set(null);
         workflowCall.set(null);
         searchCall.set(null);
+        paymentCall.set(null);
     }
 
     @Test
@@ -381,6 +387,51 @@ class ApiGatewayIntegrationTest {
     }
 
     @Test
+    void opsPaymentPathsReachThePaymentServiceWhileOtherOpsPathsStayOnTheirOwners() throws Exception {
+        String ops = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("OPS"), 300);
+
+        assertThat(get("/api/v1/ops/payments/reconciliation?x=1", ops).statusCode()).isEqualTo(200);
+        assertThat(paymentCall.get()).isEqualTo("GET /api/v1/ops/payments/reconciliation?x=1 Bearer " + ops);
+        paymentCall.set(null);
+        assertThat(send("POST", "/api/v1/ops/payments/reconciliation-runs", ops).statusCode()).isEqualTo(200);
+        assertThat(paymentCall.get()).isEqualTo("POST /api/v1/ops/payments/reconciliation-runs Bearer " + ops);
+        assertThat(get("/api/v1/ops/payments/reconciliation-findings?runId=1&type=STATUS_MISMATCH", ops).statusCode())
+                .isEqualTo(200);
+        assertThat(paymentCall.get())
+                .isEqualTo("GET /api/v1/ops/payments/reconciliation-findings?runId=1&type=STATUS_MISMATCH Bearer " + ops);
+        assertThat(upstreamPath.get()).isNull();
+        assertThat(ledgerCall.get()).isNull();
+
+        paymentCall.set(null);
+        assertThat(get("/api/v1/ops/shipments/1/history", ops).statusCode()).isEqualTo(200);
+        assertThat(get("/api/v1/ops/ledger/integrity", ops).statusCode()).isEqualTo(200);
+        assertThat(get("/api/v1/ops/shipments", ops).statusCode()).isEqualTo(200);
+        assertThat(upstreamPath.get()).isEqualTo("/api/v1/ops/shipments/1/history");
+        assertThat(ledgerCall.get()).startsWith("/api/v1/ops/ledger/integrity");
+        assertThat(searchCall.get()).startsWith("GET /api/v1/ops/shipments");
+        assertThat(paymentCall.get()).isNull();
+    }
+
+    @Test
+    void opsPaymentPathsRequireAnOpsToken() throws Exception {
+        String merchant = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("MERCHANT"), 300);
+        String wrongAudience = token(SIGNING_KEY, ISSUER, List.of("account"), List.of("OPS"), 300);
+        String expired = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("OPS"), -300);
+        String foreign = token(FOREIGN_KEY, ISSUER, List.of("routemesh-api"), List.of("OPS"), 300);
+
+        for (String path : new String[] {"/api/v1/ops/payments/reconciliation",
+                "/api/v1/ops/payments/reconciliation-runs"}) {
+            assertThat(get(path, null).statusCode()).as(path).isEqualTo(401);
+            assertThat(get(path, wrongAudience).statusCode()).as(path).isEqualTo(401);
+            assertThat(get(path, expired).statusCode()).as(path).isEqualTo(401);
+            assertThat(get(path, foreign).statusCode()).as(path).isEqualTo(401);
+            assertThat(get(path, merchant).statusCode()).as(path).isEqualTo(403);
+        }
+        assertThat(send("POST", "/api/v1/ops/payments/reconciliation-runs", merchant).statusCode()).isEqualTo(403);
+        assertThat(paymentCall.get()).isNull();
+    }
+
+    @Test
     void trackingStreamWithoutTokenIsRejectedAtTheGateway() throws Exception {
         trackingCall.set(null);
 
@@ -498,6 +549,27 @@ class ApiGatewayIntegrationTest {
             server.createContext("/", exchange -> {
                 String query = exchange.getRequestURI().getRawQuery();
                 searchCall.set(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath()
+                        + (query == null ? "" : "?" + query) + " "
+                        + exchange.getRequestHeaders().getFirst("Authorization"));
+                byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            server.start();
+            return server;
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static HttpServer startPaymentUpstream() {
+        try {
+            HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+            server.createContext("/", exchange -> {
+                String query = exchange.getRequestURI().getRawQuery();
+                paymentCall.set(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath()
                         + (query == null ? "" : "?" + query) + " "
                         + exchange.getRequestHeaders().getFirst("Authorization"));
                 byte[] body = "{}".getBytes(StandardCharsets.UTF_8);

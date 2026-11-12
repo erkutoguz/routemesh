@@ -35,6 +35,16 @@ public class LedgerRepository {
         this.jdbc = jdbc;
     }
 
+    /** Denetimin özel kilidiyle çakışan ortak kapı: her gönderim paylaşımlı, checkpoint özel alır. */
+    public static final String ENTRIES_GATE = "ledger:entries-gate";
+
+    public void lockEntriesGateShared() {
+        jdbc.sql("SELECT pg_advisory_xact_lock_shared(hashtextextended(:key, 0))")
+                .param("key", ENTRIES_GATE)
+                .query()
+                .listOfRows();
+    }
+
     public void lock(String key) {
         jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))")
                 .param("key", key)

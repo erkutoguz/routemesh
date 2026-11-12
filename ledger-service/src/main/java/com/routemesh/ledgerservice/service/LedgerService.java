@@ -195,6 +195,7 @@ public class LedgerService {
                 keys.add("account:" + code.value());
             }
         }
+        repository.lockEntriesGateShared();
         keys.forEach(repository::lock);
     }
 

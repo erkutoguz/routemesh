@@ -11,7 +11,7 @@
     <name>shipment-service</name>
     <description>shipment-service</description>
     <properties>
-        <aws-sdk.version>2.56.0</aws-sdk.version>
+        <aws-sdk.version>2.57.11</aws-sdk.version>
     </properties>
     <dependencyManagement>
         <dependencies>

@@ -1,8 +1,12 @@
 package com.routemesh.paymentservice;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.routemesh.paymentservice.psp.PspClient;
@@ -38,6 +42,53 @@ public class FakePspClient implements PspClient {
     public void reset() {
         calls.clear();
         mode = Mode.OK;
+        report.clear();
+        reportFailure = false;
+    }
+
+    private final Map<String, PspPayment> report = new LinkedHashMap<>();
+    private volatile boolean reportFailure;
+
+    /** Mutabakat testleri için PSP'nin raporunda bulunan ödemeyi ayarlar (aynı kimlik üzerine yazar). */
+    public void pspHas(PspPayment payment) {
+        synchronized (report) {
+            report.put(payment.id(), payment);
+        }
+    }
+
+    public void reportFails(boolean fails) {
+        this.reportFailure = fails;
+    }
+
+    @Override
+    public PspReportPage listPayments(Instant updatedFrom, Instant updatedTo, int limit, String cursor) {
+        calls.add(new Call("list", cursor, "", limit));
+        if (reportFailure) {
+            throw new PspUnavailableException("report unavailable in test", null);
+        }
+        List<PspPayment> matching;
+        synchronized (report) {
+            matching = report.values().stream()
+                    .filter(p -> updatedFrom == null || !p.updatedAt().isBefore(updatedFrom))
+                    .filter(p -> updatedTo == null || p.updatedAt().isBefore(updatedTo))
+                    .sorted(java.util.Comparator.comparing(PspPayment::updatedAt).thenComparing(PspPayment::id))
+                    .toList();
+        }
+        int offset = cursor == null ? 0 : Integer.parseInt(cursor);
+        int end = Math.min(matching.size(), offset + limit);
+        return new PspReportPage(matching.subList(Math.min(offset, end), end),
+                end < matching.size() ? String.valueOf(end) : null);
+    }
+
+    @Override
+    public Optional<PspPayment> findPayment(String pspPaymentId) {
+        calls.add(new Call("find", pspPaymentId, "", 0));
+        if (reportFailure) {
+            throw new PspUnavailableException("report unavailable in test", null);
+        }
+        synchronized (report) {
+            return Optional.ofNullable(report.get(pspPaymentId));
+        }
     }
 
     @Override

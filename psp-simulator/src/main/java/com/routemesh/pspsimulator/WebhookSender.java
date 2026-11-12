@@ -27,17 +27,23 @@ public class WebhookSender {
     private final SimulatorProperties properties;
     private final JsonMapper jsonMapper;
     private final Clock clock;
+    private final SimFaults faults;
     private final RestClient restClient = RestClient.create();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
 
-    public WebhookSender(SimulatorProperties properties, JsonMapper jsonMapper, Clock clock) {
+    public WebhookSender(SimulatorProperties properties, JsonMapper jsonMapper, Clock clock, SimFaults faults) {
         this.properties = properties;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
+        this.faults = faults;
     }
 
     public String send(String url, String type, Map<String, Object> data, Duration delay, int copies) {
         String eventId = "evt_" + UUID.randomUUID();
+        if (faults.dropWebhooks()) {
+            log.warn("Dropping webhook {} for {} (fault injection)", type, url);
+            return eventId;
+        }
         Map<String, Object> event = new LinkedHashMap<>();
         event.put("id", eventId);
         event.put("type", type);

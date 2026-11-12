@@ -226,7 +226,7 @@ services:
   # Docker Hub'daki minio/minio ve minio/mc depoları kaldırıldı; Chainguard kaynak koddan derlenen
   # imajı kullanılır ve digest ile sabitlenir (-dev varyantı: sh ve wget sağlık denetimi/init için gerekli).
   minio:
-    image: cgr.dev/chainguard/minio@sha256:99d9c9437fc6cefa47ea66eb0fbccfaa521272f5885fbd0520e0334415b767f7
+    image: cgr.dev/chainguard/minio@sha256:db3f583fa49121942168bd6383a773b2cde3384c9a99bf7193560b9a0f3a28fd
     container_name: routemesh-minio
     entrypoint: ["minio"]
     command: ["server", "/data", "--address", ":9100", "--console-address", ":9101"]

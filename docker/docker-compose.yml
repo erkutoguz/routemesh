@@ -1,5 +1,24 @@
 name: routemesh
 
+x-app-build: &app-build
+  context: ..
+  dockerfile: docker/service.Dockerfile
+
+x-app: &app
+  restart: unless-stopped
+  profiles:
+    - apps
+  mem_limit: 512m
+
+x-security-env: &security-env
+  ROUTEMESH_SECURITY_JWK_SET_URI: http://keycloak:8180/realms/routemesh/protocol/openid-connect/certs
+
+x-token-env: &token-env
+  ROUTEMESH_AUTH_TOKEN_URI: http://keycloak:8180/realms/routemesh/protocol/openid-connect/token
+
+x-kafka-env: &kafka-env
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+
 services:
   redis:
     image: redis:8.10.3
@@ -125,9 +144,23 @@ services:
     container_name: routemesh-connect-init
     profiles:
       - cdc-register
+      - apps
     depends_on:
       connect:
         condition: service_healthy
+      # Yayın (publication) ve outbox tabloları servislerin Flyway göçleriyle oluşur; servisler sağlıklı olmadan kayıt başarısız olur
+      shipment-service:
+        condition: service_healthy
+        required: false
+      ledger-service:
+        condition: service_healthy
+        required: false
+      payment-service:
+        condition: service_healthy
+        required: false
+      fleet-service:
+        condition: service_healthy
+        required: false
     restart: "no"
     volumes:
       - ./debezium:/connectors:ro
@@ -273,6 +306,214 @@ services:
         mc admin policy create local pod-readwrite /tmp/pod-policy.json &&
         mc admin user add local "$$POD_ACCESS_KEY" "$$POD_SECRET_KEY" &&
         mc admin policy attach local pod-readwrite --user "$$POD_ACCESS_KEY" || mc admin policy attach local pod-readwrite --user "$$POD_ACCESS_KEY" 2>&1 | grep -qi "already"
+
+  # ---------------------------------------------------------------------------------------------------------
+  # Uygulamalar (profil: apps). Altyapı varsayılan kalır; `docker compose --profile apps up -d` hepsini kaldırır.
+  # Jar'ların varsayılan (localhost) ayarlarına dokunulmaz, iç ağ adresleri ortam değişkenleriyle verilir.
+  # Konak portu yalnızca gateway (8080), keycloak (8180, yukarıda) ve demo/E2E için psp-simulator (8085) açar;
+  # diğer servisler yalnızca iç ağdadır. Token `iss` değeri http://localhost:8180 kalır (KC_HOSTNAME), JWKS ve token
+  # uçları ise konteyner ağından keycloak:8180 üzerinden okunur.
+  # ---------------------------------------------------------------------------------------------------------
+
+  api-gateway:
+    <<: *app
+    build: {<<: *app-build, args: {MODULE: api-gateway, HTTP_PORT: "8080"}}
+    image: routemesh/api-gateway:dev
+    container_name: routemesh-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      <<: *security-env
+      ROUTEMESH_UPSTREAMS_SHIPMENT: http://shipment-service:8082
+      ROUTEMESH_UPSTREAMS_WORKFLOW: http://workflow-service:8086
+      ROUTEMESH_UPSTREAMS_FLEET: http://fleet-service:8087
+      ROUTEMESH_UPSTREAMS_TRACKING: http://location-service:8089
+      ROUTEMESH_UPSTREAMS_LEDGER: http://ledger-service:8090
+      ROUTEMESH_UPSTREAMS_NOTIFICATION: http://notification-service:8093
+      ROUTEMESH_UPSTREAMS_SEARCH: http://search-service:8092
+      ROUTEMESH_UPSTREAMS_PAYMENT: http://payment-service:8084
+    depends_on:
+      keycloak:
+        condition: service_healthy
+
+  shipment-service:
+    <<: *app
+    build: {<<: *app-build, args: {MODULE: shipment-service, HTTP_PORT: "8082"}}
+    image: routemesh/shipment-service:dev
+    container_name: routemesh-shipment-service
+    environment:
+      <<: *security-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/shipment
+      ROUTEMESH_POD_STORAGE_ENDPOINT: http://minio:9100
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  pricing-service:
+    <<: *app
+    build: {<<: *app-build, args: {MODULE: pricing-service, HTTP_PORT: "8094"}}
+    image: routemesh/pricing-service:dev
+    container_name: routemesh-pricing-service
+    environment:
+      <<: *security-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/pricing
+      SPRING_DATA_REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+  ledger-service:
+    <<: *app
+    build: {<<: *app-build, args: {MODULE: ledger-service, HTTP_PORT: "8090"}}
+    image: routemesh/ledger-service:dev
+    container_name: routemesh-ledger-service
+    environment:
+      <<: *security-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ledger
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+  payment-service:
+    <<: *app
+    build: {<<: *app-build, args: {MODULE: payment-service, HTTP_PORT: "8084"}}
+    image: routemesh/payment-service:dev
+    container_name: routemesh-payment-service
+    environment:
+      <<: [*security-env, *token-env]
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/payment
+      SPRING_GRPC_CLIENT_CHANNEL_LEDGER_TARGET: static://ledger-service:9091
+      ROUTEMESH_PAYMENT_PSP_BASE_URL: http://psp-simulator:8085
+      ROUTEMESH_PAYMENT_WEBHOOK_URL: http://payment-service:8084/api/v1/webhooks/psp
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+  psp-simulator:
+    <<: *app
+    build: {<<: *app-build, args: {MODULE: psp-simulator, HTTP_PORT: "8085"}}
+    image: routemesh/psp-simulator:dev
+    container_name: routemesh-psp-simulator
+    ports:
+      - "8085:8085"
+
+  fleet-service:
+    <<: *app
+    build: {<<: *app-build, args: {MODULE: fleet-service, HTTP_PORT: "8087"}}
+    image: routemesh/fleet-service:dev
+    container_name: routemesh-fleet-service
+    environment:
+      <<: *security-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fleet
+      SPRING_DATA_REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+  location-service:
+    <<: *app
+    build: {<<: *app-build, args: {MODULE: location-service, HTTP_PORT: "8089"}}
+    image: routemesh/location-service:dev
+    container_name: routemesh-location-service
+    environment:
+      <<: [*security-env, *token-env, *kafka-env]
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_GRPC_CLIENT_CHANNEL_SHIPMENT_TARGET: static://shipment-service:9092
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+
+  surge-service:
+    <<: *app
+    build: {<<: *app-build, args: {MODULE: surge-service, HTTP_PORT: "8091"}}
+    image: routemesh/surge-service:dev
+    container_name: routemesh-surge-service
+    environment:
+      <<: [*token-env, *kafka-env]
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_GRPC_CLIENT_CHANNEL_PRICING_TARGET: static://pricing-service:9093
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+
+  notification-service:
+    <<: *app
+    build: {<<: *app-build, args: {MODULE: notification-service, HTTP_PORT: "8093"}}
+    image: routemesh/notification-service:dev
+    container_name: routemesh-notification-service
+    environment:
+      <<: [*security-env, *token-env, *kafka-env]
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/notification
+      SPRING_GRPC_CLIENT_CHANNEL_SHIPMENT_TARGET: static://shipment-service:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+
+  search-service:
+    <<: *app
+    build: {<<: *app-build, args: {MODULE: search-service, HTTP_PORT: "8092"}}
+    image: routemesh/search-service:dev
+    container_name: routemesh-search-service
+    environment:
+      <<: [*security-env, *kafka-env]
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/search
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+
+  workflow-service:
+    <<: *app
+    build: {<<: *app-build, args: {MODULE: workflow-service, HTTP_PORT: "8086"}}
+    image: routemesh/workflow-service:dev
+    container_name: routemesh-workflow-service
+    environment:
+      <<: [*security-env, *token-env, *kafka-env]
+      ROUTEMESH_TEMPORAL_TARGET: temporal:7233
+      SPRING_GRPC_CLIENT_CHANNEL_PRICING_TARGET: static://pricing-service:9093
+      SPRING_GRPC_CLIENT_CHANNEL_SHIPMENT_TARGET: static://shipment-service:9092
+      SPRING_GRPC_CLIENT_CHANNEL_PAYMENT_TARGET: static://payment-service:9095
+      SPRING_GRPC_CLIENT_CHANNEL_LEDGER_TARGET: static://ledger-service:9091
+      SPRING_GRPC_CLIENT_CHANNEL_LOCATION_TARGET: static://location-service:9090
+      SPRING_GRPC_CLIENT_CHANNEL_FLEET_TARGET: static://fleet-service:9096
+    depends_on:
+      temporal:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
 
 volumes:
   redis-data:

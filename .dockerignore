@@ -1,0 +1,17 @@
+# Derleme bağlamına yalnızca kaynak girer; çıktılar ve geliştirme artıkları dışarıda kalır
+**/target/
+.git/
+.github/
+.idea/
+.vscode/
+.claude/
+*.iml
+path.md
+CLAUDE.md
+README.md
+docs/
+docker/
+!docker/service.Dockerfile
+**/*.log
+**/.DS_Store
+**/Thumbs.db

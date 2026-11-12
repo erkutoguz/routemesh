@@ -28,6 +28,8 @@ ENV HTTP_PORT=${HTTP_PORT} \
     JAVA_OPTS="-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError"
 
 RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid app --no-create-home app
+# Geliştirme/test SMS sink hacminin (yalnızca notification-service bağlar) bağlama noktası, uygulama kullanıcısına ait
+RUN mkdir /sms && chown app:app /sms
 WORKDIR /app
 COPY --from=extract --chown=app:app /extracted/dependencies/ ./
 COPY --from=extract --chown=app:app /extracted/snapshot-dependencies/ ./

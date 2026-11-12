@@ -19,6 +19,7 @@
         <module>fleet-service</module>
         <module>surge-service</module>
         <module>notification-service</module>
+        <module>search-service</module>
         <module>ledger-service</module>
         <module>shipment-service</module>
         <module>pricing-service</module>

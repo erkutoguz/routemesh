@@ -36,6 +36,7 @@ jobs:
           - workflow-service
           - fleet-service
           - surge-service
+          - notification-service
 
     name: Test ${{ matrix.service }}
 

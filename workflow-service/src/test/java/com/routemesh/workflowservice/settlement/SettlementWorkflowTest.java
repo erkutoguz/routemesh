@@ -10,10 +10,15 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.routemesh.workflowservice.config.WorkflowMetricsInterceptor;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.temporal.client.WorkflowException;
 import io.temporal.client.WorkflowOptions;
+import io.temporal.testing.TestEnvironmentOptions;
 import io.temporal.testing.TestWorkflowEnvironment;
 import io.temporal.worker.Worker;
+import io.temporal.worker.WorkerFactoryOptions;
 
 class SettlementWorkflowTest {
 
@@ -24,6 +29,7 @@ class SettlementWorkflowTest {
     private final UUID merchantId = UUID.randomUUID();
     private final UUID courierId = UUID.randomUUID();
 
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private TestWorkflowEnvironment env;
     private FakeSettlementActivities activities;
 
@@ -42,7 +48,10 @@ class SettlementWorkflowTest {
             env.close();
         }
         activities = fake;
-        env = TestWorkflowEnvironment.newInstance();
+        env = TestWorkflowEnvironment.newInstance(TestEnvironmentOptions.newBuilder()
+                .setWorkerFactoryOptions(WorkerFactoryOptions.newBuilder()
+                        .setWorkerInterceptors(new WorkflowMetricsInterceptor(meters)).build())
+                .build());
         Worker worker = env.newWorker(TASK_QUEUE);
         worker.registerWorkflowImplementationTypes(SettlementWorkflowImpl.class);
         worker.registerActivitiesImplementations(fake);
@@ -67,6 +76,24 @@ class SettlementWorkflowTest {
         return env.getWorkflowClient().newWorkflowStub(SettlementWorkflow.class, WorkflowOptions.newBuilder()
                 .setTaskQueue(TASK_QUEUE).setWorkflowId("settlement-" + shipmentId).build())
                 .run(new SettlementInput(shipmentId, kind));
+    }
+
+    // --- metrikler ---
+
+    @Test
+    void everyRunIsCountedAsStartedAndFinishedByOutcome() {
+        run();
+        FakeSettlementActivities rejecting = new FakeSettlementActivities(context(1001, 1001, Duration.ofMinutes(10), 240));
+        rejecting.ledgerFailure = FakeSettlementActivities.rejected("FAILED_PRECONDITION: insufficient escrow");
+        start(rejecting);
+        assertThatThrownBy(this::run).isInstanceOf(WorkflowException.class);
+
+        assertThat(meters.get("routemesh.workflow.started").tag("type", "SettlementWorkflow").counter().count())
+                .isEqualTo(2);
+        assertThat(meters.get("routemesh.workflow.finished").tags("type", "SettlementWorkflow",
+                "outcome", "completed").counter().count()).isEqualTo(1);
+        assertThat(meters.get("routemesh.workflow.finished").tags("type", "SettlementWorkflow",
+                "outcome", "failed").counter().count()).isEqualTo(1);
     }
 
     // --- teslimat ---

@@ -22,6 +22,7 @@ import com.routemesh.paymentservice.repository.PaymentRepository;
 import com.routemesh.paymentservice.service.PspOperationExecutor;
 import com.routemesh.paymentservice.service.TransactionApplier;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.JsonNode;
 
 @Service
@@ -42,15 +43,22 @@ public class WebhookService {
     private final PspOperationExecutor operationExecutor;
     private final TransactionTemplate transactions;
     private final Executor taskExecutor;
+    private final MeterRegistry meters;
 
     public WebhookService(PaymentRepository repository, TransactionApplier applier,
                           PspOperationExecutor operationExecutor, TransactionTemplate transactions,
-                          @Qualifier("pspTaskExecutor") Executor taskExecutor) {
+                          @Qualifier("pspTaskExecutor") Executor taskExecutor, MeterRegistry meters) {
         this.repository = repository;
         this.applier = applier;
         this.operationExecutor = operationExecutor;
         this.transactions = transactions;
         this.taskExecutor = taskExecutor;
+        this.meters = meters;
+    }
+
+    // outcome: Result adları ya da MALFORMED; olay türü dışarıdan geldiği için etiket yapılmaz
+    private void count(String outcome) {
+        meters.counter("routemesh.payment.webhooks", "outcome", outcome).increment();
     }
 
     public Result process(JsonNode event, String rawBody) {
@@ -59,9 +67,15 @@ public class WebhookService {
         JsonNode data = event.path("data");
         String pspPaymentId = data.path("payment_id").asString("");
         if (eventId.isBlank() || type.isBlank() || pspPaymentId.isBlank()) {
+            count("MALFORMED");
             throw new MalformedWebhookException("id, type and data.payment_id are required");
         }
+        Result outcome = handle(eventId, type, data, pspPaymentId, rawBody);
+        count(outcome.name());
+        return outcome;
+    }
 
+    private Result handle(String eventId, String type, JsonNode data, String pspPaymentId, String rawBody) {
         return transactions.execute(status -> {
             UUID rowId = repository.insertWebhookEvent(eventId, type, pspPaymentId, rawBody).orElse(null);
             if (rowId == null) {

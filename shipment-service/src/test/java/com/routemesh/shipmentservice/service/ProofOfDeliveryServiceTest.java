@@ -31,6 +31,8 @@ import com.routemesh.shipmentservice.service.ShipmentException.Reason;
 import com.routemesh.shipmentservice.storage.InMemoryPodStorage;
 import com.routemesh.shipmentservice.storage.TestPodStorageConfiguration;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 @SpringBootTest(properties = "spring.grpc.server.port=0")
 @Import({TestcontainersConfiguration.class, TestPodStorageConfiguration.class})
 class ProofOfDeliveryServiceTest {
@@ -58,6 +60,9 @@ class ProofOfDeliveryServiceTest {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private MeterRegistry meters;
 
     private UUID courier;
     private UUID shipment;
@@ -316,6 +321,45 @@ class ProofOfDeliveryServiceTest {
                 .isInstanceOf(PodTooFarException.class);
 
         assertThat(attempts()).isZero();
+    }
+
+    @Test
+    void everyVerificationOutcomeAndStatusTransitionIsCounted() {
+        PodFile photo = pod.upload(shipment, courier, PodFile.Kind.PHOTO, JPEG);
+        OtpService.Issued issued = otp.issue(shipment);
+        double tooFar = pods("too_far");
+        double wrong = pods("otp_wrong");
+        double locked = pods("otp_locked");
+        double ok = pods("ok");
+        double delivered = transitions("DELIVERED");
+
+        assertThatThrownBy(() -> pod.deliver(command(shipment, key(), photo.id(), null, OUTSIDE, null)))
+                .isInstanceOf(PodTooFarException.class);
+        assertOtp(() -> pod.deliver(command(shipment, key(), photo.id(), null, INSIDE, null)), Reason.OTP_INVALID);
+        for (int i = 0; i < 5; i++) { // eksik kod deneme hakkı harcamaz, yanlış kod harcar
+            assertOtp(() -> pod.deliver(command(shipment, key(), photo.id(), null, INSIDE, wrong(issued.code()))),
+                    Reason.OTP_INVALID);
+        }
+        assertOtp(() -> pod.deliver(command(shipment, key(), photo.id(), null, INSIDE, issued.code())),
+                Reason.OTP_LOCKED);
+        assertThat(transitions("DELIVERED")).isEqualTo(delivered);
+        pod.deliver(command(shipment, key(), photo.id(), null, INSIDE, otp.issue(shipment).code()));
+
+        assertThat(pods("too_far") - tooFar).isEqualTo(1);
+        assertThat(pods("otp_wrong") - wrong).isEqualTo(6);
+        assertThat(pods("otp_locked") - locked).isEqualTo(1);
+        assertThat(pods("ok") - ok).isEqualTo(1);
+        assertThat(transitions("DELIVERED") - delivered).isEqualTo(1);
+    }
+
+    private double pods(String outcome) {
+        var counter = meters.find("routemesh.shipment.pod.verifications").tag("outcome", outcome).counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    private double transitions(String toStatus) {
+        var counter = meters.find("routemesh.shipment.transitions").tag("to_status", toStatus).counter();
+        return counter == null ? 0 : counter.count();
     }
 
     @Test

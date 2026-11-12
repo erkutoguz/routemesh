@@ -8,15 +8,19 @@ import com.routemesh.paymentservice.domain.PaymentTransaction;
 import com.routemesh.paymentservice.domain.TxnStatus;
 import com.routemesh.paymentservice.repository.PaymentRepository;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 @Component
 public class TransactionApplier {
 
     private final PaymentRepository repository;
     private final PaymentEvents events;
+    private final MeterRegistry meters;
 
-    public TransactionApplier(PaymentRepository repository, PaymentEvents events) {
+    public TransactionApplier(PaymentRepository repository, PaymentEvents events, MeterRegistry meters) {
         this.repository = repository;
         this.events = events;
+        this.meters = meters;
     }
 
     public boolean applySuccess(PaymentIntent locked, PaymentTransaction transaction, String pspReference) {
@@ -53,5 +57,8 @@ public class TransactionApplier {
         repository.updateIntent(locked.id(), target, capturedMinor, refundedMinor, reason);
         PaymentIntent updated = repository.findIntentById(locked.id()).orElseThrow();
         events.statusChanged(updated, locked.status(), reason);
+        // from/to PaymentStatus sabit kümesidir
+        meters.counter("routemesh.payment.status.transitions", "from_status", locked.status().name(),
+                "to_status", target.name()).increment();
     }
 }

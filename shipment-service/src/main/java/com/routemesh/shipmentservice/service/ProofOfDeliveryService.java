@@ -27,6 +27,8 @@ import com.routemesh.shipmentservice.service.OtpService.Outcome;
 import com.routemesh.shipmentservice.service.ShipmentException.Reason;
 import com.routemesh.shipmentservice.storage.PodStorage;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 /**
  * Teslimat kanıtı: dosya yükleme/okuma ve {@link #deliver}. {@code deliver}, kanıt kaydını ve {@code DELIVERED}
  * geçişini tek veritabanı işleminde yapar; 50 m kuralı kayıt eklemenin kendi koşuludur.
@@ -50,15 +52,23 @@ public class ProofOfDeliveryService {
     private final OtpService otpService;
     private final PodStorage storage;
     private final PodProperties properties;
+    private final MeterRegistry meters;
 
     public ProofOfDeliveryService(PodRepository pods, ShipmentRepository shipments, ShipmentService shipmentService,
-                                  OtpService otpService, PodStorage storage, PodProperties properties) {
+                                  OtpService otpService, PodStorage storage, PodProperties properties,
+                                  MeterRegistry meters) {
         this.pods = pods;
         this.shipments = shipments;
         this.shipmentService = shipmentService;
         this.otpService = otpService;
         this.storage = storage;
         this.properties = properties;
+        this.meters = meters;
+    }
+
+    // outcome: ok | too_far | otp_wrong | otp_locked
+    private void countPod(String outcome) {
+        meters.counter("routemesh.shipment.pod.verifications", "outcome", outcome).increment();
     }
 
     // --- dosya yükleme ---
@@ -137,17 +147,30 @@ public class ProofOfDeliveryService {
         double distance = pods.distanceToDelivery(command.shipmentId(), command.latitude(), command.longitude())
                 .orElseThrow(() -> notFound(command.shipmentId()));
         if (distance > MAX_DISTANCE_METERS) {
+            countPod("too_far");
             throw new PodTooFarException(round(distance));
         }
 
         Outcome otp = otpService.verify(command.shipmentId(), command.otp());
         switch (otp) {
-            case MISSING -> throw new ShipmentException(Reason.OTP_INVALID, "recipient OTP is required");
-            case INVALID -> throw new ShipmentException(Reason.OTP_INVALID, "recipient OTP is not valid");
-            case LOCKED -> throw new ShipmentException(Reason.OTP_LOCKED,
-                    "recipient OTP is locked after too many attempts, a new one must be issued");
-            case EXPIRED -> throw new ShipmentException(Reason.OTP_LOCKED,
-                    "recipient OTP has expired, a new one must be issued");
+            case MISSING -> {
+                countPod("otp_wrong");
+                throw new ShipmentException(Reason.OTP_INVALID, "recipient OTP is required");
+            }
+            case INVALID -> {
+                countPod("otp_wrong");
+                throw new ShipmentException(Reason.OTP_INVALID, "recipient OTP is not valid");
+            }
+            case LOCKED -> {
+                countPod("otp_locked");
+                throw new ShipmentException(Reason.OTP_LOCKED,
+                        "recipient OTP is locked after too many attempts, a new one must be issued");
+            }
+            case EXPIRED -> {
+                countPod("otp_locked");
+                throw new ShipmentException(Reason.OTP_LOCKED,
+                        "recipient OTP has expired, a new one must be issued");
+            }
             case NOT_REQUIRED, VERIFIED -> { }
         }
 
@@ -155,10 +178,13 @@ public class ProofOfDeliveryService {
                 command.longitude(), command.accuracyMeters(), command.recipientName().strip(), photo.id(),
                 command.signatureFileId(), otp == Outcome.VERIFIED, MAX_DISTANCE_METERS);
         if (inserted != 1) {
+            countPod("too_far");
             throw new PodTooFarException(round(pods.distanceToDelivery(command.shipmentId(), command.latitude(),
                     command.longitude()).orElse(distance)));
         }
-        return shipmentService.transition(transition, access);
+        ShipmentResult delivered = shipmentService.transition(transition, access);
+        countPod("ok");
+        return delivered;
     }
 
     // --- okuma ---

@@ -175,6 +175,12 @@ public class ReconciliationRepository {
         return counts;
     }
 
+    /** Son başarılı (bulgulu ya da bulgusuz) koşunun bitiş zamanı. */
+    public Optional<Instant> lastSuccessfulFinishedAt() {
+        return jdbc.sql("SELECT max(finished_at) FROM reconciliation_runs WHERE status IN ('OK', 'DISCREPANCIES')")
+                .query(OffsetDateTime.class).optional().map(OffsetDateTime::toInstant);
+    }
+
     /** Son başarılı (bulgulu ya da bulgusuz) koşunun pencere sonu. */
     public Optional<Instant> lastCompletedWindowEnd() {
         return jdbc.sql("SELECT max(window_to) FROM reconciliation_runs WHERE status IN ('OK', 'DISCREPANCIES')")

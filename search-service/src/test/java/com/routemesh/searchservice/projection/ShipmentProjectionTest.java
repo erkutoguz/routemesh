@@ -24,6 +24,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import com.routemesh.searchservice.Events;
 import com.routemesh.searchservice.TestcontainersConfiguration;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.core.JacksonException;
 
 @Import(TestcontainersConfiguration.class)
@@ -37,6 +38,9 @@ class ShipmentProjectionTest {
 
     @Autowired
     private JdbcClient jdbc;
+
+    @Autowired
+    private MeterRegistry meters;
 
     private final UUID shipment = UUID.randomUUID();
     private final UUID courier = UUID.randomUUID();
@@ -166,6 +170,38 @@ class ShipmentProjectionTest {
 
         assertThat(row(shipment)).containsEntry("status", "ASSIGNED").containsEntry("version", 1L);
         assertThat(count("processed_events")).isEqualTo(2);
+    }
+
+    @Test
+    void eventOutcomesAndTheSkeletonRowCountAreExposedAsMeters() {
+        double applied = events("applied");
+        double duplicate = events("duplicate");
+        double irrelevant = events("irrelevant");
+        UUID eventId = UUID.randomUUID();
+        assertThat(skeletons()).isZero();
+
+        dispatch(Events.statusChanged(eventId, shipment, "ASSIGNED", courier, 3, T0)); // taslak açar
+        dispatch(Events.statusChanged(eventId, shipment, "ASSIGNED", courier, 3, T0)); // tekrar
+        dispatch(Events.envelope(UUID.randomUUID(), "ShipmentRefunded", T0, "{\"shipmentId\":\"" + shipment + "\"}"));
+
+        assertThat(skeletons()).isEqualTo(1);
+        assertThat(events("applied") - applied).isEqualTo(1);
+        assertThat(events("duplicate") - duplicate).isEqualTo(1);
+        assertThat(events("irrelevant") - irrelevant).isEqualTo(1);
+
+        dispatch(Events.created(UUID.randomUUID(), shipment, T0)); // oluşturma olayı taslağı tamamlar
+
+        assertThat(skeletons()).isZero();
+        assertThat(events("applied") - applied).isEqualTo(2);
+    }
+
+    private double events(String outcome) {
+        var counter = meters.find("routemesh.search.projection.events").tag("outcome", outcome).counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    private double skeletons() {
+        return meters.get("routemesh.search.view.skeleton.rows").gauge().value();
     }
 
     @Test

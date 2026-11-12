@@ -19,6 +19,8 @@ import org.springframework.web.client.RestClient;
 import com.routemesh.paymentservice.config.PaymentProperties;
 import com.sun.net.httpserver.HttpServer;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 class RestPspClientTest {
 
     private record Received(String method, String path, String query, String idempotencyKey, String body) {
@@ -29,6 +31,7 @@ class RestPspClientTest {
     private volatile String responseBody = "{\"id\":\"psp_1\",\"checkout_url\":\"http://x/checkout\"}";
     private HttpServer server;
     private RestPspClient client;
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
 
     @BeforeEach
     void start() throws IOException {
@@ -53,6 +56,25 @@ class RestPspClientTest {
     @AfterEach
     void stop() {
         server.stop(0);
+    }
+
+    @Test
+    void everyCallIsTimedByOperationAndOutcome() {
+        client.createPayment("create:k1", 1001, "TRY", "http://hook", "ref-1");
+        status = 503;
+        assertThatThrownBy(() -> client.capture("psp_1", "k")).isInstanceOf(PspUnavailableException.class);
+        status = 400;
+        assertThatThrownBy(() -> client.capture("psp_1", "k")).isInstanceOf(PspRejectedException.class);
+
+        assertThat(timer("create_payment", "ok").count()).isEqualTo(1);
+        assertThat(timer("capture", "unavailable").count()).isEqualTo(1);
+        assertThat(timer("capture", "rejected").count()).isEqualTo(1);
+        assertThat(meters.find("routemesh.payment.psp.call.duration").tag("operation", "refund").timer()).isNull();
+    }
+
+    private io.micrometer.core.instrument.Timer timer(String operation, String outcome) {
+        return meters.get("routemesh.payment.psp.call.duration").tag("operation", operation)
+                .tag("outcome", outcome).timer();
     }
 
     @Test
@@ -198,9 +220,9 @@ class RestPspClientTest {
         assertThatThrownBy(() -> client.findPayment("psp_1")).isInstanceOf(PspRejectedException.class);
     }
 
-    private static RestPspClient clientFor(String baseUrl) {
+    private RestPspClient clientFor(String baseUrl) {
         PaymentProperties properties = new PaymentProperties(baseUrl, "http://hook", List.of("s"),
                 Duration.ofMinutes(5), Duration.ofMinutes(15), Duration.ofMinutes(1), Duration.ofSeconds(30), 10);
-        return new RestPspClient(RestClient.builder(), properties);
+        return new RestPspClient(RestClient.builder(), properties, meters);
     }
 }

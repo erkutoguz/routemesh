@@ -12,12 +12,14 @@ import com.routemesh.workflowservice.settlement.SettlementWorkflowImpl;
 import com.routemesh.workflowservice.workflow.DispatchWorkflowImpl;
 import com.routemesh.workflowservice.workflow.ShipmentWorkflowImpl;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowClientOptions;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 import io.temporal.serviceclient.WorkflowServiceStubsOptions;
 import io.temporal.worker.Worker;
 import io.temporal.worker.WorkerFactory;
+import io.temporal.worker.WorkerFactoryOptions;
 
 @Configuration(proxyBeanMethods = false)
 class TemporalConfiguration {
@@ -38,8 +40,9 @@ class TemporalConfiguration {
     @ConditionalOnProperty(name = "routemesh.temporal.worker-enabled", havingValue = "true")
     SmartLifecycle shipmentWorker(WorkflowClient client, TemporalProperties properties,
             ShipmentActivities activities, DispatchActivities dispatchActivities,
-            SettlementActivities settlementActivities) {
-        WorkerFactory factory = WorkerFactory.newInstance(client);
+            SettlementActivities settlementActivities, MeterRegistry meters) {
+        WorkerFactory factory = WorkerFactory.newInstance(client, WorkerFactoryOptions.newBuilder()
+                .setWorkerInterceptors(new WorkflowMetricsInterceptor(meters)).build());
         Worker worker = factory.newWorker(properties.taskQueue());
         worker.registerWorkflowImplementationTypes(ShipmentWorkflowImpl.class, DispatchWorkflowImpl.class,
                 SettlementWorkflowImpl.class);

@@ -26,6 +26,8 @@ import com.routemesh.ledgerservice.integrity.IntegrityRepository.Run;
 import com.routemesh.ledgerservice.integrity.IntegrityRepository.Unbalanced;
 import com.routemesh.ledgerservice.repository.LedgerRepository;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -63,10 +65,20 @@ public class IntegrityService {
     private final TransactionTemplate tx;
     private final TransactionTemplate snapshot;
     private final JsonMapper jsonMapper;
+    private final MeterRegistry meters;
 
     public IntegrityService(IntegrityRepository repository, LedgerRepository ledgerRepository,
                             IntegrityProperties properties, PlatformTransactionManager transactionManager,
-                            JsonMapper jsonMapper) {
+                            JsonMapper jsonMapper, MeterRegistry meters) {
+        this.meters = meters;
+        // Her scrape'te iki küçük indeksli sorgu; checkpoint'siz kalan kayıt sayısı büyüyorsa denetim geride demektir
+        Gauge.builder("routemesh.ledger.integrity.checkpoint.lag.entries", repository, r -> {
+            try {
+                return r.checkpointLag();
+            } catch (RuntimeException e) {
+                return Double.NaN;
+            }
+        }).register(meters);
         this.repository = repository;
         this.ledgerRepository = ledgerRepository;
         this.properties = properties;
@@ -122,6 +134,7 @@ public class IntegrityService {
             String message = String.valueOf(e.getMessage());
             repository.finishRun(id, "FAILED", from, to, scanned, all.size(),
                     message.length() > 500 ? message.substring(0, 500) : message);
+            recordRun(run.mode(), "FAILED", all);
             return repository.findRun(id).orElseThrow();
         }
         String status = all.isEmpty() ? "OK" : "VIOLATIONS";
@@ -134,11 +147,19 @@ public class IntegrityService {
                 publishViolation(run, all);
             }
         });
+        recordRun(run.mode(), status, all);
         if (!all.isEmpty()) {
             log.error("LEDGER_INTEGRITY_VIOLATION run={} mode={} findings={} types={}", id, run.mode(), all.size(),
                     new TreeSet<>(all.stream().map(Finding::type).toList()));
         }
         return repository.findRun(id).orElseThrow();
+    }
+
+    // mode INCREMENTAL | FULL, status OK | VIOLATIONS | FAILED, type Finding sabitleri
+    private void recordRun(String mode, String status, List<Finding> findings) {
+        meters.counter("routemesh.ledger.integrity.runs", "mode", mode, "status", status).increment();
+        findings.forEach(finding -> meters.counter("routemesh.ledger.integrity.findings", "type", finding.type())
+                .increment());
     }
 
     int failStaleRuns() {

@@ -25,6 +25,7 @@ import com.routemesh.fleetservice.repository.FleetRepository;
 import com.routemesh.fleetservice.repository.FleetRepository.Expiry;
 import com.routemesh.fleetservice.service.FleetException.Reason;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -43,9 +44,12 @@ public class FleetService {
     private final TransactionTemplate tx;
     private final JsonMapper jsonMapper;
     private final FleetProperties properties;
+    private final MeterRegistry meters;
 
     public FleetService(FleetRepository repository, CourierLock lock, FenceTokens fenceTokens,
-                        TransactionTemplate tx, JsonMapper jsonMapper, FleetProperties properties) {
+                        TransactionTemplate tx, JsonMapper jsonMapper, FleetProperties properties,
+                        MeterRegistry meters) {
+        this.meters = meters;
         this.repository = repository;
         this.lock = lock;
         this.fenceTokens = fenceTokens;
@@ -219,6 +223,8 @@ public class FleetService {
     }
 
     private void publishOffer(Offer offer, OfferStatus from) {
+        // to_status OfferStatus sabit kümesidir
+        meters.counter("routemesh.fleet.offer.transitions", "to_status", offer.status().name()).increment();
         publish(offer.courierId(), OfferStatusChangedEvent.TYPE, OfferStatusChangedEvent.VERSION,
                 new OfferStatusChangedEvent(offer.offerId(), offer.shipmentId(), offer.courierId(),
                         from == null ? null : from.name(), offer.status().name(), offer.expiresAt()));

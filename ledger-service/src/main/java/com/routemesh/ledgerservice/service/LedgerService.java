@@ -35,6 +35,7 @@ import com.routemesh.ledgerservice.repository.LedgerRepository.StoredEntry;
 import com.routemesh.ledgerservice.repository.LedgerRepository.StoredTransaction;
 import com.routemesh.ledgerservice.service.LedgerException.Reason;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.json.JsonMapper;
 
 @Service
@@ -57,10 +58,12 @@ public class LedgerService {
 
     private final LedgerRepository repository;
     private final JsonMapper jsonMapper;
+    private final MeterRegistry meters;
 
-    public LedgerService(LedgerRepository repository, JsonMapper jsonMapper) {
+    public LedgerService(LedgerRepository repository, JsonMapper jsonMapper, MeterRegistry meters) {
         this.repository = repository;
         this.jsonMapper = jsonMapper;
+        this.meters = meters;
     }
 
     @Transactional
@@ -100,6 +103,9 @@ public class LedgerService {
                     entry.direction(), entry.amountMinor());
         }
         publish(command, stored, entries);
+        // transaction_type yalnızca yetkili iç çağıranlardan (workflow şablonları) gelen sınırlı bir kümedir;
+        // tekrar oynatmalar yeni işlem sayılmaz
+        meters.counter("routemesh.ledger.transactions.posted", "type", command.transactionType()).increment();
         return new PostedTransaction(stored.id(), false, stored.createdAt());
     }
 

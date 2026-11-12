@@ -31,6 +31,8 @@ import com.routemesh.locationservice.store.Watch;
 import com.routemesh.platform.security.test.TestJwtConfiguration;
 import com.routemesh.platform.security.test.TestJwts;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "spring.grpc.server.port=0",
         "routemesh.tracking.consumer-enabled=false",
@@ -60,6 +62,9 @@ class TrackingStreamIntegrationTest {
     @Autowired
     private TrackingStreamService streams;
 
+    @Autowired
+    private MeterRegistry meters;
+
     private final HttpClient client = HttpClient.newHttpClient();
     private final List<Sse> open = new java.util.ArrayList<>();
 
@@ -83,6 +88,20 @@ class TrackingStreamIntegrationTest {
         open.forEach(Sse::close);
         // Sunucu kopan istemciyi bir sonraki yazışta fark eder; sonraki test sınırları temiz görsün
         await().atMost(Duration.ofSeconds(10)).until(() -> streams.openStreams() == 0);
+    }
+
+    @Test
+    void openConnectionsGaugeFollowsTheOpenStreams() throws Exception {
+        assertThat(meters.get("routemesh.location.sse.connections").gauge().value()).isZero();
+
+        Sse first = connect(shipment, merchantToken());
+        connect(shipment, merchantToken());
+        assertThat(meters.get("routemesh.location.sse.connections").gauge().value()).isEqualTo(2);
+
+        first.close();
+        await().atMost(Duration.ofSeconds(10))
+                .untilAsserted(() -> assertThat(meters.get("routemesh.location.sse.connections").gauge().value())
+                        .isEqualTo(1));
     }
 
     // --- yetki ---

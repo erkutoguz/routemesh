@@ -17,6 +17,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import com.routemesh.surgeservice.TestcontainersConfiguration;
 import com.routemesh.surgeservice.config.SurgeProperties;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 @DataRedisTest
 @EnableConfigurationProperties(SurgeProperties.class)
 @Import(TestcontainersConfiguration.class)
@@ -28,6 +30,7 @@ class RedisSurgePublisherTest {
     @Autowired
     private SurgeProperties properties;
 
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private RedisSurgePublisher publisher;
 
     @BeforeEach
@@ -36,7 +39,24 @@ class RedisSurgePublisherTest {
             connection.serverCommands().flushAll();
             return null;
         });
-        publisher = new RedisSurgePublisher(redis, properties);
+        publisher = new RedisSurgePublisher(redis, properties, meters);
+    }
+
+    private double multiplier(String zone) {
+        return meters.get("routemesh.surge.multiplier.bps").tag("zoneCode", zone).gauge().value();
+    }
+
+    @Test
+    void theMultiplierGaugeFollowsEachZoneIncludingTheNeutralValue() {
+        publisher.publish("A", 15_000);
+        publisher.publish("B", 22_000);
+        assertThat(multiplier("A")).isEqualTo(15_000);
+        assertThat(multiplier("B")).isEqualTo(22_000);
+
+        publisher.publish("A", 10_000);
+
+        assertThat(multiplier("A")).isEqualTo(10_000);
+        assertThat(multiplier("B")).isEqualTo(22_000);
     }
 
     @Test

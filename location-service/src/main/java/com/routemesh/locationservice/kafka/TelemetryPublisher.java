@@ -46,7 +46,7 @@ public class TelemetryPublisher {
         this.jsonMapper = jsonMapper;
         this.properties = properties;
         this.queue = new ArrayBlockingQueue<>(properties.telemetryQueueCapacity());
-        this.dropped = Counter.builder("location.telemetry.dropped").register(meters);
+        this.dropped = Counter.builder("routemesh.location.telemetry.dropped").register(meters);
     }
 
     @PostConstruct

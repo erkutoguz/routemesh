@@ -81,7 +81,7 @@ public class TrackingStreamService implements MessageListener {
         this.container = container;
         this.properties = properties;
         this.jsonMapper = jsonMapper;
-        Gauge.builder("location.tracking.streams", total, AtomicInteger::get).register(meters);
+        Gauge.builder("routemesh.location.sse.connections", total, AtomicInteger::get).register(meters);
     }
 
     @PostConstruct

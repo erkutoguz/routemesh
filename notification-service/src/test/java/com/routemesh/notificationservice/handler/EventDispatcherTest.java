@@ -38,6 +38,7 @@ import com.routemesh.notificationservice.sms.SmsChannel;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 
@@ -53,6 +54,9 @@ class EventDispatcherTest {
 
     @Autowired
     private JdbcClient jdbc;
+
+    @Autowired
+    private MeterRegistry meters;
 
     @MockitoBean
     private ShipmentServiceGrpc.ShipmentServiceBlockingStub shipments;
@@ -124,6 +128,27 @@ class EventDispatcherTest {
         verify(sms, times(1)).send(anyString(), anyString());
         assertThat(count("notifications")).isEqualTo(1);
         assertThat(count("processed_events")).isEqualTo(1);
+    }
+
+    @Test
+    void generatedNotificationsAndSmsFailuresAreCounted_redeliveriesAreNot() {
+        double sms = counter("routemesh.notification.generated", "template", "DELIVERY_OTP", "channel", "SMS");
+        double failures = counter("routemesh.notification.sms.failures", "template", "DELIVERY_OTP");
+        String event = Events.statusChanged(UUID.randomUUID(), shipmentId, "ASSIGNED", "OUT_FOR_DELIVERY");
+        doThrow(new IllegalStateException("sms gateway down")).doNothing().when(this.sms).send(anyString(), anyString());
+
+        assertThatThrownBy(() -> dispatcher.dispatch("shipment.events", event)).isInstanceOf(IllegalStateException.class);
+        dispatcher.dispatch("shipment.events", event);
+        dispatcher.dispatch("shipment.events", event); // tekrar teslim
+
+        assertThat(counter("routemesh.notification.sms.failures", "template", "DELIVERY_OTP") - failures).isEqualTo(1);
+        assertThat(counter("routemesh.notification.generated", "template", "DELIVERY_OTP", "channel", "SMS") - sms)
+                .isEqualTo(1);
+    }
+
+    private double counter(String name, String... tags) {
+        var found = meters.find(name).tags(tags).counter();
+        return found == null ? 0 : found.count();
     }
 
     @Test

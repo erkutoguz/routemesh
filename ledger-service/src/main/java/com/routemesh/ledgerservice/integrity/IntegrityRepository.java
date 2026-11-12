@@ -213,6 +213,13 @@ class IntegrityRepository {
                 .query(CHECKPOINT).list();
     }
 
+    /** Henüz bir checkpoint'in kapsamadığı kayıt sayısı: {@code max(id) - son checkpoint'in last_entry_id}. */
+    long checkpointLag() {
+        return jdbc.sql("SELECT COALESCE((SELECT max(id) FROM ledger_entries), 0) "
+                        + "- COALESCE((SELECT last_entry_id FROM ledger_checkpoints ORDER BY id DESC LIMIT 1), 0)")
+                .query(Long.class).single();
+    }
+
     void insertCheckpoint(UUID runId, long lastEntryId, long entryCount, long debit, long credit, String hash) {
         jdbc.sql("INSERT INTO ledger_checkpoints (run_id, last_entry_id, entry_count, total_debit_minor, "
                         + "total_credit_minor, chain_hash) VALUES (:run, :last, :count, :debit, :credit, :hash)")

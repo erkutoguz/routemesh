@@ -34,8 +34,8 @@ class SurgeStreamsConfiguration {
     }
 
     @Bean
-    SurgePublisher surgePublisher(StringRedisTemplate redis, SurgeProperties properties) {
-        return new RedisSurgePublisher(redis, properties);
+    SurgePublisher surgePublisher(StringRedisTemplate redis, SurgeProperties properties, MeterRegistry meters) {
+        return new RedisSurgePublisher(redis, properties, meters);
     }
 
     @Bean

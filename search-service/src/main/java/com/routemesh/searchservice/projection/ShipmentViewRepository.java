@@ -7,13 +7,29 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+
 @Repository
 public class ShipmentViewRepository {
 
     private final JdbcClient jdbc;
 
-    public ShipmentViewRepository(JdbcClient jdbc) {
+    public ShipmentViewRepository(JdbcClient jdbc, MeterRegistry meters) {
         this.jdbc = jdbc;
+        // Durum olayı oluşturma olayından önce gelirse açılan taslak satırlar; sayı sürekli büyüyorsa oluşturma
+        // olayları ulaşmıyor demektir
+        Gauge.builder("routemesh.search.view.skeleton.rows", this, repository -> {
+            try {
+                return repository.countSkeletons();
+            } catch (RuntimeException e) {
+                return Double.NaN;
+            }
+        }).register(meters);
+    }
+
+    long countSkeletons() {
+        return jdbc.sql("SELECT count(*) FROM shipment_view WHERE merchant_id IS NULL").query(Long.class).single();
     }
 
     /**

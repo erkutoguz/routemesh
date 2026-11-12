@@ -12,6 +12,7 @@ import com.routemesh.contracts.fleet.CreateOfferResponse;
 import com.routemesh.contracts.fleet.ExpireOfferRequest;
 import com.routemesh.contracts.fleet.FleetServiceGrpc;
 import com.routemesh.contracts.fleet.GetOfferRequest;
+import com.routemesh.contracts.fleet.ReleaseCourierByShipmentRequest;
 import com.routemesh.contracts.fleet.ReleaseCourierRequest;
 import com.routemesh.contracts.fleet.ReleaseCourierResponse;
 import com.routemesh.fleetservice.domain.CreateOfferCommand;
@@ -68,6 +69,14 @@ public class FleetGrpcService extends FleetServiceGrpc.FleetServiceImplBase {
                 .setReleased(fleetService.releaseCourier(
                         parseUuid(request.getCourierId(), "courier_id"),
                         parseUuid(request.getShipmentId(), "shipment_id")))
+                .build());
+    }
+
+    @Override
+    public void releaseCourierByShipment(ReleaseCourierByShipmentRequest request,
+            StreamObserver<ReleaseCourierResponse> observer) {
+        reply(observer, () -> ReleaseCourierResponse.newBuilder()
+                .setReleased(fleetService.releaseCourierOfShipment(parseUuid(request.getShipmentId(), "shipment_id")))
                 .build());
     }
 

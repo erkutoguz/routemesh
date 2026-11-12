@@ -9,7 +9,6 @@ CONNECT="${CONNECT_URL:-http://connect:8083}"
 PRICING_GRPC="${PRICING_GRPC:-pricing-service:9093}"
 LOCATION_GRPC="${LOCATION_GRPC:-location-service:9090}"
 LEDGER_GRPC="${LEDGER_GRPC:-ledger-service:9091}"
-FLEET_GRPC="${FLEET_GRPC:-fleet-service:9096}"
 SMS_SINK="${SMS_SINK_FILE:-/sms/sink.jsonl}"
 TOKEN_URL="$KEYCLOAK/realms/routemesh/protocol/openid-connect/token"
 
@@ -61,33 +60,8 @@ run_step() {
   SUMMARY+=("$result|$label|$ms")
 }
 
-# run_soft "Başlık" fonksiyon: bilinen bir açığı görünür kılar; başarısızlık WARN yazar, testi düşürmez
-run_soft() {
-  local title="$1" fn="$2" start end ms result
-  STEP_NO=$((STEP_NO + 1))
-  local label
-  label=$(printf '%02d %s' "$STEP_NO" "$title")
-  if (( ABORT )); then
-    printf '[SKIP] %s
-' "$label"
-    SUMMARY+=("SKIP|$label|-")
-    return 0
-  fi
-  STEP_NOTES=()
-  start=$(date +%s%3N)
-  if "$fn"; then result=PASS; else result=WARN; fi
-  end=$(date +%s%3N)
-  ms=$((end - start))
-  printf '[%s] %s (%d ms)
-' "$result" "$label" "$ms"
-  local line
-  for line in "${STEP_NOTES[@]}"; do printf '         %s
-' "$line"; done
-  SUMMARY+=("$result|$label|$ms")
-}
-
 print_summary() {
-  local total=$(( $(date +%s%3N) - SUITE_START )) pass=0 skip=0 warn=0 entry
+  local total=$(( $(date +%s%3N) - SUITE_START )) pass=0 skip=0 entry
   echo
   echo "================ ÖZET ================"
   for entry in "${SUMMARY[@]}"; do
@@ -95,11 +69,10 @@ print_summary() {
     printf '%-5s %-62s %8s\n' "$result" "$label" "${ms}$([[ $ms == - ]] || echo ' ms')"
     [[ $result == PASS ]] && pass=$((pass + 1))
     [[ $result == SKIP ]] && skip=$((skip + 1))
-    [[ $result == WARN ]] && warn=$((warn + 1))
   done
   echo "--------------------------------------"
-  printf 'Toplam süre: %d ms | PASS: %d | FAIL: %d | WARN: %d | SKIP: %d
-' "$total" "$pass" "$FAILED" "$warn" "$skip"
+  printf 'Toplam süre: %d ms | PASS: %d | FAIL: %d | SKIP: %d
+' "$total" "$pass" "$FAILED" "$skip"
   if (( FAILED == 0 )); then echo "SONUÇ: BAŞARILI"; else echo "SONUÇ: BAŞARISIZ"; fi
 }
 
@@ -155,7 +128,6 @@ grpc() {
     routemesh.location.*) proto=location.proto ;;
     routemesh.pricing.*) proto=pricing.proto ;;
     routemesh.ledger.*) proto=ledger.proto ;;
-    routemesh.fleet.*) proto=fleet.proto ;;
     *) echo "bilinmeyen gRPC yöntemi: $method" >&2; return 2 ;;
   esac
   grpcurl -plaintext -max-time 30 -import-path /e2e/proto -proto "$proto"     -H "authorization: Bearer $token" -d @ "$target" "$method" <<<"$data"

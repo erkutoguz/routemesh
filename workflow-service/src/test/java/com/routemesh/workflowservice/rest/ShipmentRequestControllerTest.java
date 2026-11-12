@@ -29,7 +29,7 @@ import io.temporal.client.WorkflowClient;
 import io.temporal.testing.TestWorkflowEnvironment;
 import io.temporal.worker.Worker;
 
-@SpringBootTest(properties = { "routemesh.temporal.worker-enabled=false", "routemesh.dispatch.consumer-enabled=false", "routemesh.settlement.consumer-enabled=false" })
+@SpringBootTest(properties = { "routemesh.temporal.worker-enabled=false", "routemesh.dispatch.consumer-enabled=false", "routemesh.settlement.consumer-enabled=false", "routemesh.courier-release.consumer-enabled=false" })
 @AutoConfigureMockMvc
 @Import({ TestJwtConfiguration.class, ShipmentRequestControllerTest.TemporalTestConfiguration.class })
 class ShipmentRequestControllerTest {

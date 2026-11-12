@@ -350,6 +350,37 @@ class ApiGatewayIntegrationTest {
     }
 
     @Test
+    void opsLedgerPathsReachTheLedgerServiceWhileOtherOpsPathsStayOnTheirOwners() throws Exception {
+        String ops = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("OPS"), 300);
+
+        ledgerCall.set(null);
+        assertThat(get("/api/v1/ops/ledger/integrity?x=1", ops).statusCode()).isEqualTo(200);
+        assertThat(ledgerCall.get()).isEqualTo("/api/v1/ops/ledger/integrity?x=1 Bearer " + ops);
+        ledgerCall.set(null);
+        assertThat(send("POST", "/api/v1/ops/ledger/integrity-runs", ops).statusCode()).isEqualTo(200);
+        assertThat(ledgerCall.get()).isEqualTo("/api/v1/ops/ledger/integrity-runs Bearer " + ops);
+        assertThat(upstreamPath.get()).isNull();
+
+        ledgerCall.set(null);
+        assertThat(get("/api/v1/ops/shipments/1/history", ops).statusCode()).isEqualTo(200);
+        assertThat(upstreamPath.get()).isEqualTo("/api/v1/ops/shipments/1/history");
+        assertThat(ledgerCall.get()).isNull();
+    }
+
+    @Test
+    void opsLedgerPathsRequireAnOpsToken() throws Exception {
+        ledgerCall.set(null);
+        String merchant = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("MERCHANT"), 300);
+        String wrongAudience = token(SIGNING_KEY, ISSUER, List.of("account"), List.of("OPS"), 300);
+
+        assertThat(get("/api/v1/ops/ledger/integrity", null).statusCode()).isEqualTo(401);
+        assertThat(get("/api/v1/ops/ledger/integrity", wrongAudience).statusCode()).isEqualTo(401);
+        assertThat(get("/api/v1/ops/ledger/integrity", merchant).statusCode()).isEqualTo(403);
+        assertThat(send("POST", "/api/v1/ops/ledger/integrity-runs", merchant).statusCode()).isEqualTo(403);
+        assertThat(ledgerCall.get()).isNull();
+    }
+
+    @Test
     void trackingStreamWithoutTokenIsRejectedAtTheGateway() throws Exception {
         trackingCall.set(null);
 

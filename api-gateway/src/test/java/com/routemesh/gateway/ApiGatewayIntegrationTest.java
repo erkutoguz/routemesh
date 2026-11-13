@@ -61,6 +61,8 @@ class ApiGatewayIntegrationTest {
     private static final HttpServer SEARCH_UPSTREAM = startSearchUpstream();
     private static final AtomicReference<String> paymentCall = new AtomicReference<>();
     private static final HttpServer PAYMENT_UPSTREAM = startPaymentUpstream();
+    private static final AtomicReference<String> pricingCall = new AtomicReference<>();
+    private static final HttpServer PRICING_UPSTREAM = startPricingUpstream();
 
     private final HttpClient client = HttpClient.newHttpClient();
 
@@ -88,6 +90,8 @@ class ApiGatewayIntegrationTest {
                 () -> "http://localhost:" + SEARCH_UPSTREAM.getAddress().getPort());
         registry.add("routemesh.upstreams.payment",
                 () -> "http://localhost:" + PAYMENT_UPSTREAM.getAddress().getPort());
+        registry.add("routemesh.upstreams.pricing",
+                () -> "http://localhost:" + PRICING_UPSTREAM.getAddress().getPort());
     }
 
     @AfterAll
@@ -100,6 +104,7 @@ class ApiGatewayIntegrationTest {
         NOTIFICATION_UPSTREAM.stop(0);
         SEARCH_UPSTREAM.stop(0);
         PAYMENT_UPSTREAM.stop(0);
+        PRICING_UPSTREAM.stop(0);
     }
 
     @BeforeEach
@@ -109,6 +114,7 @@ class ApiGatewayIntegrationTest {
         workflowCall.set(null);
         searchCall.set(null);
         paymentCall.set(null);
+        pricingCall.set(null);
     }
 
     @Test
@@ -470,6 +476,77 @@ class ApiGatewayIntegrationTest {
                 HttpResponse.BodyHandlers.ofString());
     }
 
+    @Test
+    void quoteRoutesReachThePricingServiceWithTheTokenAndIdempotencyKey() throws Exception {
+        String merchant = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("MERCHANT"), 300);
+
+        HttpResponse<String> created = client.send(HttpRequest.newBuilder(uri("/api/v1/quotes"))
+                .header("Authorization", "Bearer " + merchant).header("Idempotency-Key", "k-1")
+                .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString("{}")).build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(created.statusCode()).isEqualTo(200);
+        assertThat(pricingCall.get()).isEqualTo("POST /api/v1/quotes Bearer " + merchant + " k-1");
+
+        assertThat(get("/api/v1/quotes/abc", merchant).statusCode()).isEqualTo(200);
+        assertThat(pricingCall.get()).startsWith("GET /api/v1/quotes/abc Bearer ");
+        assertThat(upstreamPath.get()).isNull();
+
+        pricingCall.set(null);
+        assertThat(get("/api/v1/quotes/abc", null).statusCode()).isEqualTo(401);
+        assertThat(pricingCall.get()).isNull();
+    }
+
+    @Test
+    void courierLocationPingGoesToTheLocationServiceAndOnlyAsPost() throws Exception {
+        String courier = token(SIGNING_KEY, ISSUER, List.of("routemesh-api"), List.of("COURIER"), 300);
+
+        trackingCall.set(null);
+        HttpResponse<java.io.InputStream> ping = client.send(
+                HttpRequest.newBuilder(uri("/api/v1/couriers/me/location"))
+                        .header("Authorization", "Bearer " + courier)
+                        .POST(HttpRequest.BodyPublishers.ofString("{}")).build(),
+                HttpResponse.BodyHandlers.ofInputStream());
+        ping.body().close();
+        assertThat(ping.statusCode()).isEqualTo(200);
+        assertThat(trackingCall.get()).isEqualTo("/api/v1/couriers/me/location Bearer " + courier);
+        assertThat(send("POST", "/api/v1/couriers/me/location", null).statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    void corsPreflightIsAnsweredForTheWebOriginOnly() throws Exception {
+        HttpResponse<String> allowed = preflight("http://localhost:3001");
+        assertThat(allowed.statusCode()).isEqualTo(200);
+        assertThat(allowed.headers().firstValue("Access-Control-Allow-Origin")).contains("http://localhost:3001");
+        assertThat(allowed.headers().firstValue("Access-Control-Allow-Headers").orElse("").toLowerCase())
+                .contains("authorization", "idempotency-key");
+        assertThat(allowed.headers().firstValue("Access-Control-Allow-Methods").orElse("")).contains("POST");
+        assertThat(upstreamPath.get()).isNull();
+
+        HttpResponse<String> foreign = preflight("http://evil.example");
+        assertThat(foreign.statusCode()).isEqualTo(403);
+        assertThat(foreign.headers().firstValue("Access-Control-Allow-Origin")).isEmpty();
+    }
+
+    @Test
+    void corsHeadersAccompanyAuthenticatedResponsesAndErrors() throws Exception {
+        HttpResponse<String> unauthorized = client.send(HttpRequest.newBuilder(uri("/api/v1/quotes/abc"))
+                .header("Origin", "http://localhost:3001").GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(unauthorized.statusCode()).isEqualTo(401);
+        assertThat(unauthorized.headers().firstValue("Access-Control-Allow-Origin")).contains("http://localhost:3001");
+    }
+
+    private URI uri(String path) {
+        return URI.create("http://localhost:" + port + path);
+    }
+
+    private HttpResponse<String> preflight(String origin) throws Exception {
+        return client.send(HttpRequest.newBuilder(uri("/api/v1/quotes"))
+                .header("Origin", origin).header("Access-Control-Request-Method", "POST")
+                .header("Access-Control-Request-Headers", "authorization,content-type,idempotency-key")
+                .method("OPTIONS", HttpRequest.BodyPublishers.noBody()).build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
     private HttpResponse<String> get(String path, String token) throws Exception {
         return send("GET", path, token);
     }
@@ -577,6 +654,26 @@ class ApiGatewayIntegrationTest {
                 searchCall.set(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath()
                         + (query == null ? "" : "?" + query) + " "
                         + exchange.getRequestHeaders().getFirst("Authorization"));
+                byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            server.start();
+            return server;
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static HttpServer startPricingUpstream() {
+        try {
+            HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+            server.createContext("/", exchange -> {
+                pricingCall.set(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath() + " "
+                        + exchange.getRequestHeaders().getFirst("Authorization") + " "
+                        + exchange.getRequestHeaders().getFirst("Idempotency-Key"));
                 byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json");
                 exchange.sendResponseHeaders(200, body.length);

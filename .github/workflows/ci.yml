@@ -65,16 +65,51 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  web:
+    name: Test web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
   ci-passed:
     name: CI passed
     runs-on: ubuntu-24.04
-    needs: test
+    needs: [test, web]
     if: always()
 
     steps:
       - name: Verify test results
         run: |
-          if [ "${{ needs.test.result }}" != "success" ]; then
-            echo "Test jobs finished with result: ${{ needs.test.result }}"
+          if [ "${{ needs.test.result }}" != "success" ] || [ "${{ needs.web.result }}" != "success" ]; then
+            echo "Test jobs finished with result: ${{ needs.test.result }}, web: ${{ needs.web.result }}"
             exit 1
           fi

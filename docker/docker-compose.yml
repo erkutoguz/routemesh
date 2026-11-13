@@ -340,6 +340,7 @@ services:
       ROUTEMESH_UPSTREAMS_NOTIFICATION: http://notification-service:8093
       ROUTEMESH_UPSTREAMS_SEARCH: http://search-service:8092
       ROUTEMESH_UPSTREAMS_PAYMENT: http://payment-service:8084
+      ROUTEMESH_UPSTREAMS_PRICING: http://pricing-service:8094
     depends_on:
       keycloak:
         condition: service_healthy

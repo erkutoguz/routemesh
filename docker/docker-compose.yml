@@ -340,6 +340,7 @@ services:
       ROUTEMESH_UPSTREAMS_NOTIFICATION: http://notification-service:8093
       ROUTEMESH_UPSTREAMS_SEARCH: http://search-service:8092
       ROUTEMESH_UPSTREAMS_PAYMENT: http://payment-service:8084
+      ROUTEMESH_UPSTREAMS_PRICING: http://pricing-service:8094
     depends_on:
       keycloak:
         condition: service_healthy
@@ -654,6 +655,36 @@ services:
         condition: service_healthy
       workflow-service:
         condition: service_healthy
+
+  web:
+    build:
+      context: ../web
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8080
+        NEXT_PUBLIC_KEYCLOAK_URL: http://localhost:8180
+        PSP_SIMULATOR_URL: http://psp-simulator:8085
+        NEXT_PUBLIC_MAP_TILE_URL: ${NEXT_PUBLIC_MAP_TILE_URL:-}
+    image: routemesh/web:dev
+    container_name: routemesh-web
+    profiles:
+      - web
+    restart: unless-stopped
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      psp-simulator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3001/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
 
 volumes:
   sms-sink:

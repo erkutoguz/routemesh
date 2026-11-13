@@ -293,7 +293,7 @@ services:
   # routemesh-pod bucket'ını (herkese kapalı) ve yalnızca bu bucket'a okuma/yazma yetkili servis kullanıcısını kurar.
   # Silme yetkisi bilerek yok: teslimat kanıtı değişmezdir.
   minio-init:
-    image: cgr.dev/chainguard/minio-client@sha256:11c116267e67aae889193021e0d7d5b7f611dc5ce688ae42b99f586dffd40316
+    image: cgr.dev/chainguard/minio-client@sha256:2e433473835685d7daf6a266dbbf44fc9d5479b24cb351b7d170492f4fe971d4
     container_name: routemesh-minio-init
     depends_on:
       minio:

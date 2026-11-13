@@ -561,7 +561,7 @@ services:
       retries: 10
 
   tempo:
-    image: grafana/tempo@sha256:0ef775495967cd5d7a6b2e146b6ea695d624803c8db8349fb8ce4164f719f9b7 # 2.8.2
+    image: grafana/tempo@sha256:1ce31d6d7ffab62189685e8c47881d4a561c5d38bd0dbd66e40ca83cef07923d # 2.8.2
     container_name: routemesh-tempo
     profiles:
       - observability

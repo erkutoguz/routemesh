@@ -17,6 +17,14 @@ Open http://localhost:3001 and sign in with a seeded user (`merchant`, `warehous
 |---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8080` |
 | `NEXT_PUBLIC_KEYCLOAK_URL` | `http://localhost:8180` |
+| `PSP_SIMULATOR_URL` | `http://localhost:8085` (server side, used by the `/psp-sim` rewrite) |
+
+## Merchant console
+
+- `/merchant/quote`: price a shipment (preset Istanbul places or free coordinates), create it with an `Idempotency-Key`, then complete the payment through the PSP simulator with one click. The browser calls the simulator through the same-origin `/psp-sim` rewrite, so the simulator needs no CORS configuration. The `checkout_url` the simulator returns has no page behind it.
+- `/merchant/shipments`: CQRS search list with a status filter and keyset "Load more".
+- `/merchant/shipments/[id]`: live tracking. `EventSource` cannot send an `Authorization` header, so `src/lib/sse.ts` reads the stream with `fetch` and reconnects with backoff (the gateway ends streams when the token expires).
+- `/merchant/wallet`: wallet balance and the double-entry ledger history.
 
 ## Auth
 

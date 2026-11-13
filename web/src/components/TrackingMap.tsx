@@ -50,10 +50,9 @@ export default function TrackingMap({
       className="h-[420px] w-full rounded border border-slate-200"
     >
       <TileLayer
-        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        subdomains="abcd"
-        maxZoom={20}
+        url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        maxZoom={19}
       />
       {pickup && (
         <CircleMarker center={[pickup.latitude, pickup.longitude]} radius={9} pathOptions={{ color: "#0369a1", fillColor: "#0ea5e9", fillOpacity: 0.9 }}>

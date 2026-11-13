@@ -19,6 +19,7 @@ new record and mark the old one `Superseded by ADR-NNNN`.
 | [0011](0011-three-way-reconciliation-without-auto-correction.md) | Three-way reconciliation that reports and never corrects | Money |
 | [0012](0012-postgis-proof-of-delivery-and-hmac-otp.md) | Proof of delivery within 50 metres with an HMAC-protected OTP | Delivery |
 | [0013](0013-shared-buildkit-container-architecture.md) | One shared BuildKit Dockerfile for all applications | Packaging |
+| [0014](0014-web-console-oidc-pkce-and-fetch-sse.md) | A browser-only web console with Authorization Code + PKCE and a fetch-based SSE reader | Web |
 
 Format: `Status` (Accepted, Superseded), `Date`, `Related`, then `Context`, `Decision`, `Consequences` and
 `Alternatives considered`. Operational procedures that follow from these decisions live in the [runbook](../runbook.md).

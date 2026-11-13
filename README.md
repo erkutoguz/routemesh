@@ -24,11 +24,12 @@ Temporal sagas and keep each other honest with automated integrity audits and a 
 3. [Key flows](#key-flows)
 4. [Security and integrity guarantees](#security-and-integrity-guarantees)
 5. [Quickstart](#quickstart)
-6. [Testing, CI and numbers](#testing-ci-and-numbers)
-7. [Observability](#observability)
-8. [Repository layout](#repository-layout)
-9. [Documentation](#documentation)
-10. [Known limitations](#known-limitations)
+6. [Web console](#web-console)
+7. [Testing, CI and numbers](#testing-ci-and-numbers)
+8. [Observability](#observability)
+9. [Repository layout](#repository-layout)
+10. [Documentation](#documentation)
+11. [Known limitations](#known-limitations)
 
 ## Architecture
 
@@ -90,7 +91,8 @@ Everything between services is either a gRPC call (commands, always the `WORKFLO
 ## Service catalog
 
 Twelve applications and three shared modules. Ports are the in-network ports; with the `apps` profile only the
-gateway (8080), Keycloak (8180) and the PSP simulator (8085, demo use) are published to the host. Every published port
+gateway (8080), Keycloak (8180) and the PSP simulator (8085, demo use) are published to the host, plus the web console (3001) with
+the `web` profile. Every published port
 except the gateway's binds to `127.0.0.1` only. In the `prod`/`production` profile payment-service and shipment-service refuse to
 start while the PSP webhook secret, the OTP secret or the object-store secret still has its development default.
 
@@ -337,7 +339,10 @@ docker compose --profile apps up -d --wait
 # 3. add Prometheus, Tempo and Grafana
 docker compose --profile apps --profile observability up -d --wait
 
-# 4. the 22-step end-to-end smoke test (starts the stack by itself; no Tempo here, so disable trace export)
+# 4. the web console on http://localhost:3001 (needs the apps profile; add it to the same command)
+docker compose --profile apps --profile web up -d --wait
+
+# 5. the 22-step end-to-end smoke test (starts the stack by itself; no Tempo here, so disable trace export)
 TRACING_EXPORT=false docker compose --profile e2e run --rm e2e
 ```
 
@@ -346,6 +351,7 @@ non-root runtime, actuator health checks); the first build takes a few minutes.
 
 | What | Where |
 |---|---|
+| Web console | http://localhost:3001 (sign in as `merchant`, `warehouse`, `courier` or `ops`) |
 | API gateway | http://localhost:8080 |
 | Keycloak | http://localhost:8180 (realm `routemesh`) |
 | PSP simulator | http://localhost:8085 |
@@ -378,6 +384,25 @@ Notes for local runs: Keycloak imports its realm only on the first start of a fr
 [runbook](docs/runbook.md#1-keycloak-realm-re-import) to change or re-import it. The SMS sink file
 (`routemesh.notification.sms.sink-file`) writes OTP codes in clear text and refuses to start under a `prod` profile.
 
+## Web console
+
+The RouteMesh Console (`web/`) is a Next.js, TypeScript and Tailwind app that signs in through Keycloak with
+Authorization Code + PKCE and sends each user to the console of their realm role. It talks to the gateway directly with
+the user's own token; there is no backend-for-frontend ([ADR-0014](docs/adr/0014-web-console-oidc-pkce-and-fetch-sse.md)).
+
+| Role | Console | What it does | Main endpoints |
+|---|---|---|---|
+| `MERCHANT` | `/merchant` | Price a shipment, create it with an idempotency key, pay through the PSP simulator, keyset-paged shipment list, live map over SSE with the 50 m geofence ring and approach banners, wallet balance and ledger entries | `POST /api/v1/quotes`, `POST /api/v1/shipments`, `GET /api/v1/search/shipments`, `GET /api/v1/tracking/{id}/stream`, `GET /api/v1/wallets/me` |
+| `WAREHOUSE` | `/warehouse` | Shipments waiting for the warehouse, receive and mark ready | `GET /api/v1/warehouse/shipments`, `POST /api/v1/warehouse/shipments/{id}/receive` and `/ready` |
+| `COURIER` | `/courier` | Go online, accept or reject offers, send GPS pings (depot, 120 m, 15 m, map click), depart, deliver with photo, signature and OTP; the 50 m rule shows as a `422` | `/api/v1/fleet/me/**`, `POST /api/v1/couriers/me/location`, `POST /api/v1/shipments/{id}/deliver` |
+| `OPS` | `/ops` | Reconciliation summary, manual run (`202`), filtered findings; ledger integrity summary, checkpoint, incremental check and full audit | `/api/v1/ops/payments/reconciliation**`, `/api/v1/ops/ledger/**` |
+
+Beyond the API surface that already existed, the console needed two thin REST endpoints over existing service logic
+(`POST /api/v1/quotes` in `pricing-service` and `POST /api/v1/couriers/me/location` in `location-service`), a CORS
+configuration for the web origin in the gateway, and a `S256` PKCE rule on the `routemesh-web` client. The `web` Compose profile builds
+`web/Dockerfile` (pinned Node 22 Alpine, standalone output, non-root, health check); see [web/README.md](web/README.md) for
+development and the Keycloak notes.
+
 ## Testing, CI and numbers
 
 Every module is built and tested from the repository root with `mvn verify`. Tests run against real infrastructure
@@ -402,12 +427,16 @@ triggers, advisory locks and Lua scripts are exercised on the real thing, not mo
 | `platform-observability` | 8 |
 | **Total** | **1031** (0 failures; `contracts` has no tests of its own) |
 
+The web console adds 57 Vitest unit tests (money formatting, the SSE parser and reconnect loop, the API client, return-path
+safety, geodesy, tracking events and the typed endpoint modules) next to `eslint`, `tsc` and `next build`. The Java counts above are from the
+document's original run; the gateway, pricing and location suites have grown since the REST endpoints for the console were added.
+
 At a glance: 15 Maven modules (12 applications and 3 shared modules), 6 protobuf services with 25 RPCs, 21 Flyway
 migrations, 4 Debezium outbox connectors, 6 Kafka topics plus per-consumer dead-letter topics, about 16.7 thousand lines
-of production Java in 316 files, 3 Grafana dashboards, 8 alert rules and 13 ADRs.
+of production Java in 316 files, 3 Grafana dashboards, 8 alert rules and 14 ADRs.
 
-- **CI** (`.github/workflows/ci.yml`): one job per module (`Test <module>`) on every pull request and push to `main`, and a
-  single required `CI passed` check that summarizes them.
+- **CI** (`.github/workflows/ci.yml`): one job per module (`Test <module>`) plus `Test web` (lint, type check, unit tests,
+  build) on every pull request and push to `main`, and a single required `CI passed` check that summarizes them.
 - **End-to-end** (`.github/workflows/e2e.yml`): builds all twelve images, starts the whole platform with Docker Compose
   and runs the 22-step smoke test, nightly and on demand (never per pull request: it is the heavy one). Container logs
   are uploaded as an artifact on failure.
@@ -439,8 +468,9 @@ of production Java in 316 files, 3 Grafana dashboards, 8 alert rules and 13 ADRs
 ├── platform-observability/    observation filters shared by the applications
 ├── api-gateway/ shipment-service/ payment-service/ psp-simulator/ workflow-service/ fleet-service/
 │   location-service/ ledger-service/ surge-service/ search-service/ notification-service/ pricing-service/
+├── web/                       RouteMesh Console: Next.js app, Vitest tests, Dockerfile
 ├── docker/
-│   ├── docker-compose.yml     infra (default), apps, observability, e2e profiles
+│   ├── docker-compose.yml     infra (default), apps, web, observability, e2e profiles
 │   ├── service.Dockerfile     shared build for the twelve applications
 │   ├── debezium/              outbox connector definitions
 │   ├── keycloak/              realm export and image
@@ -455,7 +485,7 @@ of production Java in 316 files, 3 Grafana dashboards, 8 alert rules and 13 ADRs
 
 ## Documentation
 
-- [Architecture decision records](docs/adr/README.md): thirteen decisions, each with context, the choice and its
+- [Architecture decision records](docs/adr/README.md): fourteen decisions, each with context, the choice and its
   consequences.
 - [Operations runbook](docs/runbook.md): Keycloak realm re-import, dead-letter topics, ledger integrity audits,
   reconciliation findings and other first-response procedures.

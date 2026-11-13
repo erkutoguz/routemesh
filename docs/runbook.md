@@ -103,10 +103,11 @@ into a fresh database. A fresh `postgres` volume also re-runs `docker/postgres/i
 **Where they are.** Consumers with side effects publish records they could not process to
 `<source topic>.<consumer>.dlt` (14 days retention): `shipment.events.notification-service.dlt`,
 `fleet.events.notification-service.dlt`, `location.events.notification-service.dlt` and
-`shipment.events.search-service.dlt`. Background: [ADR-0006](adr/0006-inbox-and-dead-letter-topics.md). The workflow-service
-relays have no dead-letter topic (see "limits" below).
+`shipment.events.search-service.dlt`, `shipment.events.workflow-service.dlt` (the dispatch, settlement and courier-release relays;
+tell them apart by `kafka_dlt-consumer-group`) and `shipment.events.location-service.dlt` (proximity watch).
+Background: [ADR-0006](adr/0006-inbox-and-dead-letter-topics.md).
 
-**Signals.** Alert `DeadLetterGrowth` (metric `routemesh_notification_dlt_messages_total{topic}`; `search-service` has no
+**Signals.** Alert `DeadLetterGrowth` (metrics `routemesh_{notification,workflow,location}_dlt_messages_total{topic}`; `search-service` has no
 counter, so watch its topic directly), and consumer errors in the service log.
 
 ### Inspect
@@ -162,8 +163,10 @@ must not grow again. If the same record fails again, the cause was not fixed.
 
 - Replaying does not remove the original dead-letter record; offsets only move forward. Note replays in the incident record.
 - Records are only retained for 14 days in the dead-letter topics (7 days for the source topics).
-- `workflow-service` relays (dispatch, settlement, courier release) retry a failed record 30 times, two seconds apart, and then skip it
-  without a dead-letter record. If a settlement or a courier release was skipped, find the shipment in the Temporal UI
+- The `workflow-service` relays and the `location-service` proximity watch retry a transient failure with exponential back-off
+  (1 s up to 60 s, about ten minutes in total) and then write the record to their dead-letter topic; a malformed or
+  permanently invalid record goes there at once. While a record is retried its partition waits. A dead-lettered settlement or
+  courier release did not happen: replay it after fixing the cause, or find the shipment in the Temporal UI
   (`settlement-<shipmentId>` workflow) or release the courier by hand ([section 5](#5-other-first-responses)).
 
 ## 3. Ledger integrity

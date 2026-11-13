@@ -11,6 +11,7 @@ import java.util.function.Predicate;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.routemesh.shipmentservice.config.PodProperties;
 import com.routemesh.shipmentservice.domain.Actor;
@@ -31,7 +32,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 
 /**
  * Teslimat kanıtı: dosya yükleme/okuma ve {@link #deliver}. {@code deliver}, kanıt kaydını ve {@code DELIVERED}
- * geçişini tek veritabanı işleminde yapar; 50 m kuralı kayıt eklemenin kendi koşuludur.
+ * geçişini tek (dar) veritabanı işleminde yapar; 50 m kuralı kayıt eklemenin kendi koşuludur.
  */
 @Service
 public class ProofOfDeliveryService {
@@ -53,10 +54,11 @@ public class ProofOfDeliveryService {
     private final PodStorage storage;
     private final PodProperties properties;
     private final MeterRegistry meters;
+    private final TransactionTemplate transactions;
 
     public ProofOfDeliveryService(PodRepository pods, ShipmentRepository shipments, ShipmentService shipmentService,
                                   OtpService otpService, PodStorage storage, PodProperties properties,
-                                  MeterRegistry meters) {
+                                  MeterRegistry meters, TransactionTemplate transactions) {
         this.pods = pods;
         this.shipments = shipments;
         this.shipmentService = shipmentService;
@@ -64,6 +66,7 @@ public class ProofOfDeliveryService {
         this.storage = storage;
         this.properties = properties;
         this.meters = meters;
+        this.transactions = transactions;
     }
 
     // outcome: ok | too_far | otp_wrong | otp_locked
@@ -117,40 +120,43 @@ public class ProofOfDeliveryService {
 
     // --- teslimat ---
 
-    @Transactional
+    /**
+     * Dış işlem açmaz: OTP doğrulaması kendi işleminde ({@code REQUIRES_NEW}) bağlantı ister; çağıran bir bağlantıyı
+     * tutarken ikincisini beklerse eşzamanlı teslimatlar bağlantı havuzunu kilitler. Bu yüzden önce kilitsiz ön
+     * kontroller ve OTP, sonra yalnızca dar bir işlemde kilit + kanıt kaydı + geçiş yapılır.
+     */
     public ShipmentResult deliver(DeliverCommand command) {
-        Shipment shipment = shipments.findByIdForUpdate(command.shipmentId())
+        Shipment shipment = shipments.findById(command.shipmentId())
                 .filter(found -> command.courierId().equals(found.courierId()))
                 .orElseThrow(() -> notFound(command.shipmentId()));
-        Predicate<Shipment> access = found -> command.courierId().equals(found.courierId());
-        TransitionCommand transition = new TransitionCommand(command.shipmentId(), ShipmentStatus.DELIVERED,
-                Actor.COURIER, command.transitionKey(), null, null, ShipmentStatus.OUT_FOR_DELIVERY);
 
-        if (shipments.findHistoryRequestHash(command.shipmentId(), command.transitionKey()).isPresent()) {
-            // Aynı anahtar: yalnızca aynı kanıtla tekrarlanırsa özgün sonuç döner
-            ProofOfDelivery recorded = pods.findProof(command.shipmentId()).orElse(null);
-            if (recorded == null || !sameProof(recorded, command)) {
-                throw new ShipmentException(Reason.IDEMPOTENCY_CONFLICT,
-                        "transition_key was already used with a different request");
+        boolean otpVerified = false;
+        // Aynı anahtarla tekrar: ön kontroller ve OTP atlanır, özgün sonuç kilitli blokta döner
+        if (shipments.findHistoryRequestHash(command.shipmentId(), command.transitionKey()).isEmpty()) {
+            requireOutForDelivery(shipment);
+            validate(command);
+            requireFile(command.photoFileId(), command.shipmentId(), PodFile.Kind.PHOTO, "photo_file_id");
+            if (command.signatureFileId() != null) {
+                requireFile(command.signatureFileId(), command.shipmentId(), PodFile.Kind.SIGNATURE,
+                        "signature_file_id");
             }
-            return shipmentService.transition(transition, access);
+
+            // Yan etkisiz ön kontrol: uzaktaki kurye OTP deneme hakkı harcamasın
+            double distance = pods.distanceToDelivery(command.shipmentId(), command.latitude(), command.longitude())
+                    .orElseThrow(() -> notFound(command.shipmentId()));
+            if (distance > MAX_DISTANCE_METERS) {
+                countPod("too_far");
+                throw new PodTooFarException(round(distance));
+            }
+            otpVerified = checkOtp(command);
         }
 
-        requireOutForDelivery(shipment);
-        validate(command);
-        PodFile photo = requireFile(command.photoFileId(), command.shipmentId(), PodFile.Kind.PHOTO, "photo_file_id");
-        if (command.signatureFileId() != null) {
-            requireFile(command.signatureFileId(), command.shipmentId(), PodFile.Kind.SIGNATURE, "signature_file_id");
-        }
+        boolean verified = otpVerified;
+        return transactions.execute(status -> recordAndDeliver(command, verified));
+    }
 
-        // Yan etkisiz ön kontrol: uzaktaki kurye OTP deneme hakkı harcamasın
-        double distance = pods.distanceToDelivery(command.shipmentId(), command.latitude(), command.longitude())
-                .orElseThrow(() -> notFound(command.shipmentId()));
-        if (distance > MAX_DISTANCE_METERS) {
-            countPod("too_far");
-            throw new PodTooFarException(round(distance));
-        }
-
+    /** @return OTP doğrulandıysa true, gönderi için OTP istenmiyorsa false */
+    private boolean checkOtp(DeliverCommand command) {
         Outcome otp = otpService.verify(command.shipmentId(), command.otp());
         switch (otp) {
             case MISSING -> {
@@ -173,14 +179,39 @@ public class ProofOfDeliveryService {
             }
             case NOT_REQUIRED, VERIFIED -> { }
         }
+        return otp == Outcome.VERIFIED;
+    }
+
+    /** Dar işlem: satır kilidi, kanıt kaydı ve {@code DELIVERED} geçişi birlikte. Burada ikinci bağlantı açılmaz. */
+    private ShipmentResult recordAndDeliver(DeliverCommand command, boolean otpVerified) {
+        Shipment shipment = shipments.findByIdForUpdate(command.shipmentId())
+                .filter(found -> command.courierId().equals(found.courierId()))
+                .orElseThrow(() -> notFound(command.shipmentId()));
+        Predicate<Shipment> access = found -> command.courierId().equals(found.courierId());
+        TransitionCommand transition = new TransitionCommand(command.shipmentId(), ShipmentStatus.DELIVERED,
+                Actor.COURIER, command.transitionKey(), null, null, ShipmentStatus.OUT_FOR_DELIVERY);
+
+        if (shipments.findHistoryRequestHash(command.shipmentId(), command.transitionKey()).isPresent()) {
+            // Aynı anahtar: yalnızca aynı kanıtla tekrarlanırsa özgün sonuç döner
+            ProofOfDelivery recorded = pods.findProof(command.shipmentId()).orElse(null);
+            if (recorded == null || !sameProof(recorded, command)) {
+                throw new ShipmentException(Reason.IDEMPOTENCY_CONFLICT,
+                        "transition_key was already used with a different request");
+            }
+            return shipmentService.transition(transition, access);
+        }
+
+        // Kilit altında yeniden doğrula: ön kontrolden sonra eşzamanlı bir istek gönderiyi ilerletmiş olabilir
+        requireOutForDelivery(shipment);
+        PodFile photo = requireFile(command.photoFileId(), command.shipmentId(), PodFile.Kind.PHOTO, "photo_file_id");
 
         int inserted = pods.insertProofWithinDistance(command.shipmentId(), command.courierId(), command.latitude(),
                 command.longitude(), command.accuracyMeters(), command.recipientName().strip(), photo.id(),
-                command.signatureFileId(), otp == Outcome.VERIFIED, MAX_DISTANCE_METERS);
+                command.signatureFileId(), otpVerified, MAX_DISTANCE_METERS);
         if (inserted != 1) {
             countPod("too_far");
             throw new PodTooFarException(round(pods.distanceToDelivery(command.shipmentId(), command.latitude(),
-                    command.longitude()).orElse(distance)));
+                    command.longitude()).orElse(MAX_DISTANCE_METERS)));
         }
         ShipmentResult delivered = shipmentService.transition(transition, access);
         countPod("ok");

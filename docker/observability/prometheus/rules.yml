@@ -65,8 +65,8 @@ groups:
   - name: routemesh-kafka
     rules:
       - alert: DeadLetterGrowth
-        expr: increase(routemesh_notification_dlt_messages_total[15m]) > 0
+        expr: sum by (application, topic) (increase({__name__=~"routemesh_(notification|workflow|location)_dlt_messages_total"}[15m])) > 0
         labels: {severity: warning}
         annotations:
           summary: "Ölü mektup konusuna kayıt yazıldı"
-          description: "notification-service son 15 dakikada {{ $labels.topic }} kaynağından {{ $value }} kaydı DLT'ye gönderdi."
+          description: "{{ $labels.application }} son 15 dakikada {{ $labels.topic }} kaynağından {{ $value }} kaydı DLT'ye gönderdi."

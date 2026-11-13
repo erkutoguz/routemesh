@@ -31,7 +31,7 @@ services:
     image: redis:8.10.3
     container_name: routemesh-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -57,7 +57,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -71,7 +71,7 @@ services:
     image: apache/kafka:4.4.0
     container_name: routemesh-kafka
     ports:
-      - "9094:9094"
+      - "127.0.0.1:9094:9094"
     environment:
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
       KAFKA_NODE_ID: 1
@@ -129,7 +129,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "8083:8083"
+      - "127.0.0.1:8083:8083"
     environment:
       BOOTSTRAP_SERVERS: kafka:19092
       GROUP_ID: routemesh-connect
@@ -196,8 +196,8 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "8180:8180"
-      - "9000:9000"
+      - "127.0.0.1:8180:8180"
+      - "127.0.0.1:9000:9000"
     environment:
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: keycloak
@@ -240,7 +240,7 @@ services:
       temporal-postgres:
         condition: service_healthy
     ports:
-      - "7233:7233"
+      - "127.0.0.1:7233:7233"
     environment:
       DB: postgres12
       DB_PORT: 5432
@@ -262,7 +262,7 @@ services:
       temporal:
         condition: service_healthy
     ports:
-      - "8088:8080"
+      - "127.0.0.1:8088:8080"
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_DEFAULT_NAMESPACE: routemesh
@@ -276,8 +276,8 @@ services:
     entrypoint: ["minio"]
     command: ["server", "/data", "--address", ":9100", "--console-address", ":9101"]
     ports:
-      - "9100:9100"
-      - "9101:9101"
+      - "127.0.0.1:9100:9100"
+      - "127.0.0.1:9101:9101"
     environment:
       MINIO_ROOT_USER: minio_root
       MINIO_ROOT_PASSWORD: minio_root_dev_secret
@@ -325,7 +325,7 @@ services:
 
   api-gateway:
     <<: *app
-    build: {<<: *app-build, args: {MODULE: api-gateway, HTTP_PORT: "8080"}}
+    build: {<<: *app-build, args: {MODULE: api-gateway, HTTP_PORT: "8080", HEALTH_PORT: "8079"}}
     image: routemesh/api-gateway:dev
     container_name: routemesh-api-gateway
     ports:
@@ -415,7 +415,7 @@ services:
     image: routemesh/psp-simulator:dev
     container_name: routemesh-psp-simulator
     ports:
-      - "8085:8085"
+      - "127.0.0.1:8085:8085"
     environment:
       <<: *otel-env
 
@@ -548,7 +548,7 @@ services:
       - --web.enable-remote-write-receiver
       - --enable-feature=exemplar-storage
     ports:
-      - "9099:9090"
+      - "127.0.0.1:9099:9090"
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./observability/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
@@ -580,7 +580,7 @@ services:
     profiles:
       - observability
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin

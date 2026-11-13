@@ -36,7 +36,7 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "management.server.port=0")
 @AutoConfigureMetrics
 class ApiGatewayIntegrationTest {
 
@@ -66,6 +66,9 @@ class ApiGatewayIntegrationTest {
 
     @Value("${local.server.port}")
     private int port;
+
+    @Value("${local.management.port}")
+    private int managementPort;
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -434,13 +437,19 @@ class ApiGatewayIntegrationTest {
     }
 
     @Test
-    void prometheusIsServedByTheGatewayItselfWithoutATokenAndIsNeverForwarded() throws Exception {
-        HttpResponse<String> response = get("/actuator/prometheus", null);
+    void prometheusIsServedOnlyOnTheManagementPort_andIsNeverForwarded() throws Exception {
+        HttpResponse<String> response = getFrom(managementPort, "/actuator/prometheus");
 
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.body()).contains("jvm_memory_used_bytes").contains("application=\"api-gateway\"");
         assertThat(upstreamPath.get()).isNull();
-        assertThat(get("/actuator/env", null).statusCode()).isEqualTo(401);
+        assertThat(getFrom(managementPort, "/actuator/env").statusCode()).isIn(401, 404);
+    }
+
+    @Test
+    void prometheusIsNotReachableOnTheApiPort() throws Exception {
+        assertThat(get("/actuator/prometheus", null).statusCode()).isIn(401, 404);
+        assertThat(upstreamPath.get()).isNull();
     }
 
     @Test
@@ -452,8 +461,13 @@ class ApiGatewayIntegrationTest {
     }
 
     @Test
-    void healthEndpointIsPublic() throws Exception {
-        assertThat(get("/actuator/health", null).statusCode()).isEqualTo(200);
+    void healthEndpointIsPublicOnTheManagementPort() throws Exception {
+        assertThat(getFrom(managementPort, "/actuator/health").statusCode()).isEqualTo(200);
+    }
+
+    private HttpResponse<String> getFrom(int targetPort, String path) throws Exception {
+        return client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + targetPort + path)).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
     }
 
     private HttpResponse<String> get(String path, String token) throws Exception {

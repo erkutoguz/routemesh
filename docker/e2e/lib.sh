@@ -3,6 +3,7 @@
 # Bu dosya doğrudan çalıştırılmaz; smoke.sh içe aktarır.
 
 GATEWAY="${GATEWAY_URL:-http://api-gateway:8080}"
+GATEWAY_MANAGEMENT="${GATEWAY_MANAGEMENT_URL:-http://api-gateway:8079}"
 KEYCLOAK="${KEYCLOAK_URL:-http://keycloak:8180}"
 PSP_SIM="${PSP_SIMULATOR_URL:-http://psp-simulator:8085}"
 CONNECT="${CONNECT_URL:-http://connect:8083}"

@@ -25,11 +25,12 @@ Temporal sagas and keep each other honest with automated integrity audits and a 
 4. [Security and integrity guarantees](#security-and-integrity-guarantees)
 5. [Quickstart](#quickstart)
 6. [Web console](#web-console)
-7. [Testing, CI and numbers](#testing-ci-and-numbers)
-8. [Observability](#observability)
-9. [Repository layout](#repository-layout)
-10. [Documentation](#documentation)
-11. [Known limitations](#known-limitations)
+7. [Live demo and screenshots](#live-demo-and-screenshots)
+8. [Testing, CI and numbers](#testing-ci-and-numbers)
+9. [Observability](#observability)
+10. [Repository layout](#repository-layout)
+11. [Documentation](#documentation)
+12. [Known limitations](#known-limitations)
 
 ## Architecture
 
@@ -402,6 +403,69 @@ Beyond the API surface that already existed, the console needed two thin REST en
 configuration for the web origin in the gateway, and a `S256` PKCE rule on the `routemesh-web` client. The `web` Compose profile builds
 `web/Dockerfile` (pinned Node 22 Alpine, standalone output, non-root, health check); see [web/README.md](web/README.md) for
 development and the Keycloak notes.
+
+## Live demo and screenshots
+
+Every image below was captured from one end-to-end run on a freshly created stack (`docker compose --profile apps --profile web
+--profile observability up -d --wait` on empty volumes), driving the real console in a desktop browser at 1440 x 900 with the seeded
+users. Nothing is mocked: one parcel goes from a priced quote to a settled wallet, and the data on every screen belongs to that run.
+Sign in at http://localhost:3001 with `merchant`, `warehouse`, `courier` or `ops` (password `<name>-dev`) to repeat it.
+
+### 1. Merchant: quote and checkout
+
+![Merchant quote and checkout](docs/images/01-merchant-quote-checkout.png)
+
+An Express shipment from Sultanahmet to Kadıköy was priced by `pricing-service` (zone, surge and SLA) and created with an idempotency key. The
+payment panel shows the shipment and the PSP payment, waiting for the one-click payment; the webhook then moves the shipment to `PAID`.
+
+### 2. Warehouse: the queue
+
+![Warehouse queue](docs/images/02-warehouse-queue.png)
+
+Paid parcels appear in the warehouse queue (the CQRS read model). Receiving moves a parcel to `AT_WAREHOUSE`, marking it ready releases it to dispatch.
+Each click carries its own idempotency key.
+
+### 3. Courier: the 50 m rule
+
+![Courier geofence error](docs/images/03-courier-geofence-error.png)
+
+The courier accepted the offer, departed and reported a position 120 m from the drop-off. Delivering from there is refused with HTTP 422 and the
+distance, and the check runs before the OTP is consumed, so a courier who is not at the door cannot burn the recipient's attempts.
+
+### 4. Merchant: live tracking over SSE
+
+![Merchant live tracking](docs/images/04-merchant-live-tracking-sse.png)
+
+The merchant's map follows the courier through a Server-Sent Events stream read with `fetch` (the browser's `EventSource` cannot send a bearer
+token). The courier marker moves inside the 50 m proof-of-delivery ring and the approach banners report the pickup and the drop-off.
+
+### 5. Courier: proof of delivery
+
+![Courier proof of delivery](docs/images/05-courier-pod-delivery.png)
+
+From 15 m the courier attaches a photo and a signature and types the recipient's one-time code, read from the development SMS sink. The code is stored
+only as an HMAC; the proof, its files and the shipment history are immutable.
+
+### 6. Merchant: wallet and double-entry ledger
+
+![Merchant wallet and ledger](docs/images/06-merchant-wallet-ledger.png)
+
+After delivery the settlement workflow credits the merchant's wallet with 75 % of the shipment amount as a `DELIVERY_SETTLEMENT` entry of the
+immutable ledger (the courier gets 18 %, the platform the rest). The balance is the sum of the entries below it.
+
+### 7. Operations: reconciliation and ledger integrity
+
+![Operations reconciliation and ledger integrity](docs/images/07-ops-reconciliation-integrity.png)
+
+The three-way reconciliation compares the platform, the PSP and the ledger and only ever reports; the integrity audit re-checks balanced transactions,
+totals and the checkpoint hash chain. A manual run answers `202` and the summary refreshes while it runs. Both are clean here.
+
+### 8. Observability: dashboard and distributed trace
+
+![Grafana dashboard and Tempo trace](docs/images/08-grafana-trace-observability.png)
+
+The business-flow dashboard (Prometheus) above and one distributed trace in Tempo below: a single `POST /api/v1/shipments` crossing nine
+services and 101 spans, from the gateway through the workflow saga to pricing, shipment and payment.
 
 ## Testing, CI and numbers
 

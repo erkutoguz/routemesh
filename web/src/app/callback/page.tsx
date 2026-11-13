@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { userManager } from "@/lib/auth/oidc";
+import { safeReturnTo } from "@/lib/auth/returnTo";
 
 let handled = false;
 
@@ -18,7 +19,7 @@ export default function Callback() {
     handled = true;
     userManager()
       .signinRedirectCallback()
-      .then(() => router.replace("/"))
+      .then((user) => router.replace(safeReturnTo((user.state as { returnTo?: unknown } | undefined)?.returnTo)))
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "Sign-in failed"));
   }, [router]);
 

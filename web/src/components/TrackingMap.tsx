@@ -3,10 +3,16 @@
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useEffect } from "react";
-import { Circle, CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from "react-leaflet";
+import { Circle, CircleMarker, MapContainer, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
+import { POD_RADIUS_METERS } from "@/lib/geo";
 import type { Point } from "@/lib/api/merchant";
 
-export const POD_RADIUS_METERS = 50;
+function Pick({ onPick }: { onPick: (point: Point) => void }) {
+  useMapEvents({
+    click: (e) => onPick({ latitude: e.latlng.lat, longitude: e.latlng.lng }),
+  });
+  return null;
+}
 
 function Fit({ points }: { points: Point[] }) {
   const map = useMap();
@@ -26,10 +32,14 @@ export default function TrackingMap({
   pickup,
   delivery,
   courier,
+  onPick,
+  pickupLabel = "Pickup",
 }: {
   pickup: Point | null;
   delivery: Point;
   courier: Point | null;
+  onPick?: (point: Point) => void;
+  pickupLabel?: string;
 }) {
   const fitPoints = [delivery, ...(pickup ? [pickup] : [])];
   return (
@@ -47,7 +57,7 @@ export default function TrackingMap({
       />
       {pickup && (
         <CircleMarker center={[pickup.latitude, pickup.longitude]} radius={9} pathOptions={{ color: "#0369a1", fillColor: "#0ea5e9", fillOpacity: 0.9 }}>
-          <Tooltip permanent direction="top">Pickup</Tooltip>
+          <Tooltip permanent direction="top">{pickupLabel}</Tooltip>
         </CircleMarker>
       )}
       <CircleMarker center={[delivery.latitude, delivery.longitude]} radius={9} pathOptions={{ color: "#047857", fillColor: "#10b981", fillOpacity: 0.9 }}>
@@ -63,6 +73,7 @@ export default function TrackingMap({
           <Tooltip permanent direction="bottom">Courier</Tooltip>
         </CircleMarker>
       )}
+      {onPick && <Pick onPick={onPick} />}
       <Fit points={courier ? [...fitPoints, courier] : fitPoints} />
     </MapContainer>
   );

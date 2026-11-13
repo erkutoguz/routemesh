@@ -1,11 +1,12 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { User } from "oidc-client-ts";
 import { userManager } from "./oidc";
+import { currentReturnTo } from "./returnTo";
 import { decodeClaims, rolesFromToken, type Role } from "./roles";
 
-type Status = "loading" | "anonymous" | "authenticated";
+type Status = "loading" | "anonymous" | "authenticated" | "signing-out";
 
 interface AuthContextValue {
   status: Status;
@@ -27,10 +28,14 @@ function usable(user: User | null): user is User {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [status, setStatus] = useState<Status>("loading");
+  const signingOut = useRef(false);
 
   useEffect(() => {
     const manager = userManager();
     const apply = (next: User | null) => {
+      if (signingOut.current) {
+        return;
+      }
       setUser(usable(next) ? next : null);
       setStatus(usable(next) ? "authenticated" : "anonymous");
     };
@@ -49,8 +54,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const login = useCallback(() => userManager().signinRedirect(), []);
-  const logout = useCallback(() => userManager().signoutRedirect(), []);
+  const login = useCallback(() => userManager().signinRedirect({ state: { returnTo: currentReturnTo(window.location) } }), []);
+  const logout = useCallback(() => {
+    signingOut.current = true;
+    setStatus("signing-out");
+    return userManager().signoutRedirect();
+  }, []);
   const getAccessToken = useCallback(async () => {
     const current = await userManager().getUser();
     return usable(current) ? current.access_token : null;

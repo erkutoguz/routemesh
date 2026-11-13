@@ -19,7 +19,7 @@ export function RoleShell({ role, children }: { role: Role; children: ReactNode 
   }, [status, allowed, login, router]);
 
   if (status !== "authenticated" || !allowed) {
-    return <p className="p-8 text-slate-500">Checking your session…</p>;
+    return <p className="p-8 text-slate-500">{status === "signing-out" ? "Signing out…" : "Checking your session…"}</p>;
   }
 
   return (

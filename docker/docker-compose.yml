@@ -111,7 +111,7 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists
         --topic $$topic --partitions 3 --replication-factor 1 --config retention.ms=604800000 || exit 1;
         done;
-        for topic in shipment.events.notification-service.dlt fleet.events.notification-service.dlt location.events.notification-service.dlt shipment.events.search-service.dlt; do
+        for topic in shipment.events.notification-service.dlt fleet.events.notification-service.dlt location.events.notification-service.dlt shipment.events.search-service.dlt shipment.events.workflow-service.dlt shipment.events.location-service.dlt; do
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists
         --topic $$topic --partitions 3 --replication-factor 1 --config retention.ms=1209600000 || exit 1;
         done;

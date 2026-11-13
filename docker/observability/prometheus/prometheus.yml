@@ -10,7 +10,7 @@ rule_files:
 scrape_configs:
   - job_name: api-gateway
     metrics_path: /actuator/prometheus
-    static_configs: [{targets: ["api-gateway:8080"]}]
+    static_configs: [{targets: ["api-gateway:8079"]}]
   - job_name: shipment-service
     metrics_path: /actuator/prometheus
     static_configs: [{targets: ["shipment-service:8082"]}]

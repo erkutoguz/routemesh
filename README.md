@@ -90,7 +90,9 @@ Everything between services is either a gRPC call (commands, always the `WORKFLO
 ## Service catalog
 
 Twelve applications and three shared modules. Ports are the in-network ports; with the `apps` profile only the
-gateway (8080), Keycloak (8180) and the PSP simulator (8085, demo use) are published to the host.
+gateway (8080), Keycloak (8180) and the PSP simulator (8085, demo use) are published to the host. Every published port
+except the gateway's binds to `127.0.0.1` only. In the `prod`/`production` profile payment-service and shipment-service refuse to
+start while the PSP webhook secret, the OTP secret or the object-store secret still has its development default.
 
 | Service | HTTP | gRPC | State | Who may call it | Responsibility |
 |---|---|---|---|---|---|
@@ -413,7 +415,7 @@ of production Java in 316 files, 3 Grafana dashboards, 8 alert rules and 13 ADRs
 
 ## Observability
 
-- **Metrics.** Every application serves `/actuator/prometheus` (unauthenticated; only the gateway's is reachable from the host). Business meters are
+- **Metrics.** Every application serves `/actuator/prometheus` (unauthenticated; none is published to the host: the gateway serves its actuator on the unpublished management port 8079). Business meters are
   prefixed `routemesh_` and never use an unbounded value as a label (no shipment, user or payment ids): shipment and
   payment transitions, proof-of-delivery outcomes, webhook outcomes, PSP call latency, workflow starts and results,
   settlement postings, ledger checkpoint lag, integrity and reconciliation runs and findings, dead-letter counts,

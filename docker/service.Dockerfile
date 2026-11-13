@@ -24,7 +24,10 @@ RUN set -eu; \
 # eclipse-temurin:21.0.8_9-jre-noble
 FROM eclipse-temurin@sha256:20e7f7288e1c18eebe8f06a442c9f7183342d9b022d3b9a9677cae2b558ddddd AS runtime
 ARG HTTP_PORT
+# Aktüatör ayrı bir portta ise (api-gateway: 8079) sağlık denetimi oraya gider; verilmezse uygulama portu kullanılır
+ARG HEALTH_PORT
 ENV HTTP_PORT=${HTTP_PORT} \
+    HEALTH_PORT=${HEALTH_PORT:-${HTTP_PORT}} \
     JAVA_OPTS="-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError"
 
 RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid app --no-create-home app
@@ -38,6 +41,6 @@ USER app
 
 EXPOSE ${HTTP_PORT}
 HEALTHCHECK --interval=10s --timeout=5s --start-period=90s --retries=12 \
-    CMD curl -fsS "http://localhost:${HTTP_PORT}/actuator/health" > /dev/null || exit 1
+    CMD curl -fsS "http://localhost:${HEALTH_PORT}/actuator/health" > /dev/null || exit 1
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]

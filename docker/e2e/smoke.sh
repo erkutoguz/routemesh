@@ -22,7 +22,7 @@ SEQ=0
 # ---------------------------------------------------------------------------------------------------------
 
 step_gateway() {
-  retry 120 3 curl -fsS -m 5 -o /dev/null "$GATEWAY/actuator/health" || fail "gateway sağlıklı değil ($GATEWAY)" || return 1
+  retry 120 3 curl -fsS -m 5 -o /dev/null "$GATEWAY_MANAGEMENT/actuator/health" || fail "gateway sağlıklı değil ($GATEWAY)" || return 1
   note "gateway sağlıklı"
 }
 

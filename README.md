@@ -9,6 +9,8 @@ Temporal sagas and keep each other honest with automated integrity audits and a 
 [![CI](https://github.com/erkutoguz/routemesh/actions/workflows/ci.yml/badge.svg)](https://github.com/erkutoguz/routemesh/actions/workflows/ci.yml)
 [![E2E smoke](https://github.com/erkutoguz/routemesh/actions/workflows/e2e.yml/badge.svg)](https://github.com/erkutoguz/routemesh/actions/workflows/e2e.yml)
 
+> **How this was built:** I designed the architecture and made all technical decisions; the code was implemented with AI coding agents under my review.
+
 - **Correctness first.** Money is `long` kuruş in a single currency (`TRY`). Ledger, status history and proof of
   delivery are append-only, enforced by database triggers. Every write command is idempotent.
 - **Zero trust.** Every service validates the caller's JWT itself; the gateway never mints or rewrites an identity.

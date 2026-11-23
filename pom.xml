@@ -34,7 +34,7 @@
         <spring-boot.version>4.1.2</spring-boot.version>
         <grpc.version>1.84.1</grpc.version>
         <protobuf.version>4.36.2</protobuf.version>
-        <spring-cloud.version>2025.1.4</spring-cloud.version>
+        <spring-cloud.version>2026.0.0</spring-cloud.version>
     </properties>
 
     <dependencyManagement>
